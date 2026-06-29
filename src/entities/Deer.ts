@@ -38,7 +38,47 @@ const bodyColors = [
   new THREE.Color('#a0522d'),
   new THREE.Color('#d4a373'),
   new THREE.Color('#8b5e3c'),
+  new THREE.Color('#cd853f'),
+  new THREE.Color('#deb887'),
+  new THREE.Color('#bc8f8f'),
+  new THREE.Color('#c4a882'),
+  new THREE.Color('#a0825a'),
 ];
+
+function createFeedIndicatorTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  // Outer glow
+  ctx.beginPath();
+  ctx.arc(32, 32, 22, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 213, 79, 0.25)';
+  ctx.fill();
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(32, 32, 16, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffd54f';
+  ctx.fill();
+  ctx.strokeStyle = '#ff8a65';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // "!" icon
+  ctx.fillStyle = '#5d4037';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('!', 32, 30);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+const feedIndicatorTexture = createFeedIndicatorTexture();
 
 export class Deer {
   readonly group = new THREE.Group();
@@ -54,6 +94,7 @@ export class Deer {
   private readonly legBL: THREE.Mesh;
   private readonly legBR: THREE.Mesh;
   private readonly tail: THREE.Mesh;
+  private readonly legHooves: THREE.Mesh[] = [];
 
   // AI state
   private readonly tuning: DeerTuning;
@@ -68,6 +109,16 @@ export class Deer {
 
   // Antlers
   private readonly antlers: THREE.Group;
+  private readonly hasAntlers: boolean;
+
+  // Feed indicator (3D world-space prompt)
+  private readonly feedIndicator: THREE.Sprite;
+
+  private readonly legBaseX: [number, number, number, number];
+
+  // Visual variety
+  readonly scaleFactor: number;
+  readonly isMale: boolean;
 
   fed = false;
 
@@ -76,6 +127,17 @@ export class Deer {
     this.tuning = { ...DEFAULT_TUNING, ...tuning };
     this.homePosition = position.clone();
     this.wanderTarget = position.clone();
+
+    // ---- Visual variety ----
+    this.scaleFactor = 0.82 + Math.random() * 0.36; // 0.82 ~ 1.18
+    this.isMale = Math.random() > 0.45;
+    this.hasAntlers = this.isMale && Math.random() > 0.2;
+
+    const bodyWidth = 0.38 + Math.random() * 0.18;
+    const bodyHeight = 0.24 + Math.random() * 0.14;
+    const bodyDepth = 0.52 + Math.random() * 0.22;
+    const legHeight = 0.2 + Math.random() * 0.1;
+    const neckHeight = 0.16 + Math.random() * 0.08;
 
     // Body color
     const bodyColor = bodyColors[index % bodyColors.length];
@@ -86,51 +148,53 @@ export class Deer {
     });
 
     // ---- Body ----
-    const bodyGeo = new THREE.BoxGeometry(0.45, 0.3, 0.65);
+    const bodyGeo = new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth);
     // Round the body a bit
     const bodyPos = bodyGeo.attributes.position;
     for (let i = 0; i < bodyPos.count; i++) {
       const x = bodyPos.getX(i);
       const y = bodyPos.getY(i);
       const z = bodyPos.getZ(i);
-      // Slight rounding
-      bodyPos.setX(i, x * (1 - Math.abs(y) * 0.1));
-      bodyPos.setZ(i, z * (1 - Math.abs(y) * 0.1));
+      // Slight rounding based on height
+      const rounding = 1 - Math.abs(y) * (0.08 + Math.random() * 0.06);
+      bodyPos.setX(i, x * rounding);
+      bodyPos.setZ(i, z * rounding);
     }
     bodyPos.needsUpdate = true;
     bodyGeo.computeVertexNormals();
 
     this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    this.bodyMesh.position.y = 0.45;
+    this.bodyMesh.position.y = bodyHeight * 1.5;
     this.bodyMesh.castShadow = true;
     this.bodyMesh.receiveShadow = true;
     this.group.add(this.bodyMesh);
 
     // ---- Neck ----
     this.neck = new THREE.Group();
-    this.neck.position.set(0, 0.5, -0.28);
+    this.neck.position.set(0, bodyHeight * 1.5, -bodyDepth * 0.43);
     this.group.add(this.neck);
 
-    const neckGeo = new THREE.CylinderGeometry(0.06, 0.08, 0.2, 6);
+    const neckGeo = new THREE.CylinderGeometry(0.05, 0.07, neckHeight, 6);
     const neckMesh = new THREE.Mesh(neckGeo, bodyMat);
-    neckMesh.position.y = 0.1;
+    neckMesh.position.y = neckHeight * 0.5;
     neckMesh.rotation.x = 0.3;
     neckMesh.castShadow = true;
     this.neck.add(neckMesh);
 
     // ---- Head ----
     this.head = new THREE.Group();
-    this.head.position.set(0, 0.18, -0.05);
+    this.head.position.set(0, neckHeight + 0.02, -0.04);
     this.neck.add(this.head);
 
-    const headGeo = new THREE.BoxGeometry(0.1, 0.08, 0.16);
+    const headWidth = 0.09 + Math.random() * 0.04;
+    const headGeo = new THREE.BoxGeometry(headWidth, 0.07, 0.15);
     const headMat = new THREE.MeshStandardMaterial({
       color: bodyColor,
       roughness: 0.7,
       metalness: 0,
     });
     const headMesh = new THREE.Mesh(headGeo, headMat);
-    headMesh.position.set(0, 0, -0.08);
+    headMesh.position.set(0, 0, -0.07);
     headMesh.castShadow = true;
     this.head.add(headMesh);
 
@@ -140,9 +204,9 @@ export class Deer {
       roughness: 0.8,
       metalness: 0,
     });
-    const snoutGeo = new THREE.SphereGeometry(0.035, 6, 6);
+    const snoutGeo = new THREE.SphereGeometry(0.032, 6, 6);
     const snout = new THREE.Mesh(snoutGeo, snoutMat);
-    snout.position.set(0, -0.01, -0.16);
+    snout.position.set(0, -0.01, -0.15);
     snout.scale.set(1, 0.7, 1.3);
     this.head.add(snout);
 
@@ -151,9 +215,9 @@ export class Deer {
       color: '#1a1a1a',
       roughness: 0.5,
     });
-    const noseGeo = new THREE.SphereGeometry(0.02, 6, 6);
+    const noseGeo = new THREE.SphereGeometry(0.018, 6, 6);
     const nose = new THREE.Mesh(noseGeo, noseMat);
-    nose.position.set(0, 0.01, -0.19);
+    nose.position.set(0, 0.01, -0.18);
     this.head.add(nose);
 
     // Eyes
@@ -162,16 +226,16 @@ export class Deer {
       roughness: 0.2,
     });
     for (let side = -1; side <= 1; side += 2) {
-      const eyeGeo = new THREE.SphereGeometry(0.015, 6, 6);
+      const eyeGeo = new THREE.SphereGeometry(0.014, 6, 6);
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(side * 0.045, 0.02, -0.1);
+      eye.position.set(side * 0.042, 0.02, -0.09);
       this.head.add(eye);
 
       // Eye highlight
       const highlightMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-      const hlGeo = new THREE.SphereGeometry(0.005, 4, 4);
+      const hlGeo = new THREE.SphereGeometry(0.004, 4, 4);
       const hl = new THREE.Mesh(hlGeo, highlightMat);
-      hl.position.set(side * 0.048, 0.025, -0.09);
+      hl.position.set(side * 0.045, 0.024, -0.08);
       this.head.add(hl);
     }
 
@@ -181,52 +245,55 @@ export class Deer {
       roughness: 0.7,
     });
     for (let side = -1; side <= 1; side += 2) {
-      const earGeo = new THREE.ConeGeometry(0.025, 0.05, 4);
+      const earGeo = new THREE.ConeGeometry(0.022, 0.045, 4);
       const ear = new THREE.Mesh(earGeo, earMat);
-      ear.position.set(side * 0.055, 0.03, -0.03);
+      ear.position.set(side * 0.05, 0.03, -0.02);
       ear.rotation.z = side * 0.3;
       ear.rotation.x = -0.2;
       this.head.add(ear);
     }
 
-    // ---- Antlers (males) ----
+    // ---- Antlers (males only) ----
     this.antlers = new THREE.Group();
-    const antlerMat = new THREE.MeshStandardMaterial({
-      color: '#6d4c41',
-      roughness: 0.9,
-      metalness: 0,
-    });
-    for (let side = -1; side <= 1; side += 2) {
-      this.buildAntler(side, antlerMat);
+    if (this.hasAntlers) {
+      const antlerMat = new THREE.MeshStandardMaterial({
+        color: '#6d4c41',
+        roughness: 0.9,
+        metalness: 0,
+      });
+      for (let side = -1; side <= 1; side += 2) {
+        this.buildAntler(side, antlerMat, index);
+      }
     }
-    this.antlers.position.set(0, 0.03, -0.04);
+    this.antlers.position.set(0, 0.03, -0.03);
     this.head.add(this.antlers);
 
     // ---- Legs ----
+    const darkerColor = bodyColor.clone().multiplyScalar(0.85);
     const legMat = new THREE.MeshStandardMaterial({
-      color: bodyColor.clone().multiplyScalar(0.85),
+      color: darkerColor,
       roughness: 0.8,
       metalness: 0,
     });
-    const legGeo = new THREE.CylinderGeometry(0.025, 0.03, 0.25, 5);
+    const legGeo = new THREE.CylinderGeometry(0.022, 0.028, legHeight, 5);
 
     this.legFL = new THREE.Mesh(legGeo, legMat);
-    this.legFL.position.set(-0.12, 0.22, -0.18);
+    this.legFL.position.set(-bodyWidth * 0.27, legHeight * 0.5, -bodyDepth * 0.28);
     this.legFL.castShadow = true;
     this.group.add(this.legFL);
 
     this.legFR = new THREE.Mesh(legGeo, legMat);
-    this.legFR.position.set(0.12, 0.22, -0.18);
+    this.legFR.position.set(bodyWidth * 0.27, legHeight * 0.5, -bodyDepth * 0.28);
     this.legFR.castShadow = true;
     this.group.add(this.legFR);
 
     this.legBL = new THREE.Mesh(legGeo, legMat);
-    this.legBL.position.set(-0.12, 0.22, 0.2);
+    this.legBL.position.set(-bodyWidth * 0.27, legHeight * 0.5, bodyDepth * 0.3);
     this.legBL.castShadow = true;
     this.group.add(this.legBL);
 
     this.legBR = new THREE.Mesh(legGeo, legMat);
-    this.legBR.position.set(0.12, 0.22, 0.2);
+    this.legBR.position.set(bodyWidth * 0.27, legHeight * 0.5, bodyDepth * 0.3);
     this.legBR.castShadow = true;
     this.group.add(this.legBR);
 
@@ -235,26 +302,35 @@ export class Deer {
       color: '#3e2723',
       roughness: 0.9,
     });
-    const hoofGeo = new THREE.CylinderGeometry(0.028, 0.032, 0.03, 5);
-    for (const legPos of [
-      [-0.12, 0.34, -0.18],
-      [0.12, 0.34, -0.18],
-      [-0.12, 0.34, 0.2],
-      [0.12, 0.34, 0.2],
-    ]) {
+    const hoofGeo = new THREE.CylinderGeometry(0.025, 0.03, 0.03, 5);
+    const legPositions = [
+      [-bodyWidth * 0.27, legHeight + 0.02, -bodyDepth * 0.28],
+      [bodyWidth * 0.27, legHeight + 0.02, -bodyDepth * 0.28],
+      [-bodyWidth * 0.27, legHeight + 0.02, bodyDepth * 0.3],
+      [bodyWidth * 0.27, legHeight + 0.02, bodyDepth * 0.3],
+    ] as const;
+    for (const pos of legPositions) {
       const hoof = new THREE.Mesh(hoofGeo, hoofMat);
-      hoof.position.set(legPos[0], legPos[1], legPos[2]);
+      hoof.position.set(pos[0], pos[1], pos[2]);
+      this.legHooves.push(hoof);
       this.group.add(hoof);
     }
+
+    this.legBaseX = [
+      this.legFL.position.x,
+      this.legFR.position.x,
+      this.legBL.position.x,
+      this.legBR.position.x,
+    ];
 
     // ---- Tail ----
     const tailMat = new THREE.MeshStandardMaterial({
       color: '#f5f5f5',
       roughness: 0.9,
     });
-    const tailGeo = new THREE.SphereGeometry(0.03, 5, 5);
+    const tailGeo = new THREE.SphereGeometry(0.028, 5, 5);
     this.tail = new THREE.Mesh(tailGeo, tailMat);
-    this.tail.position.set(0, 0.5, 0.32);
+    this.tail.position.set(0, bodyHeight * 1.6, bodyDepth * 0.5);
     this.tail.scale.set(0.8, 0.6, 1);
     this.group.add(this.tail);
 
@@ -264,47 +340,97 @@ export class Deer {
         color: '#f5f0e8',
         roughness: 0.8,
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.25,
       });
       for (let i = 0; i < 3; i++) {
-        const spotGeo = new THREE.CircleGeometry(0.03 + Math.random() * 0.02, 5);
+        const spotGeo = new THREE.CircleGeometry(0.025 + Math.random() * 0.025, 5);
         const spot = new THREE.Mesh(spotGeo, spotMat);
         spot.position.set(
-          (Math.random() - 0.5) * 0.3,
-          0.5 + (Math.random() - 0.5) * 0.1,
-          (Math.random() - 0.5) * 0.4,
+          (Math.random() - 0.5) * bodyWidth * 0.7,
+          bodyHeight * 1.5 + (Math.random() - 0.5) * bodyHeight * 0.4,
+          (Math.random() - 0.5) * bodyDepth * 0.6,
         );
         spot.rotation.x = -Math.PI / 2;
         this.group.add(spot);
       }
     }
 
+    // ---- Feed indicator (3D prompt) ----
+    this.feedIndicator = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: feedIndicatorTexture,
+        transparent: true,
+        depthTest: false,
+        sizeAttenuation: true,
+      }),
+    );
+    this.feedIndicator.position.y = 1.0;
+    this.feedIndicator.scale.set(0.3, 0.3, 1);
+    this.feedIndicator.visible = false;
+    this.group.add(this.feedIndicator);
+
+    // Apply scale to the whole deer
+    this.group.scale.set(this.scaleFactor, this.scaleFactor, this.scaleFactor);
+
     this.group.position.copy(position);
     this.group.rotation.y = Math.random() * Math.PI * 2;
   }
 
-  private buildAntler(side: number, mat: THREE.MeshStandardMaterial): void {
-    // Main beam
-    const points: THREE.Vector3[] = [];
-    points.push(new THREE.Vector3(0, 0, 0));
-    points.push(new THREE.Vector3(side * 0.04, 0.04, 0));
-    points.push(new THREE.Vector3(side * 0.06, 0.07, 0));
-    points.push(new THREE.Vector3(side * 0.05, 0.09, 0));
+  private buildAntler(side: number, mat: THREE.MeshStandardMaterial, seed: number): void {
+    const variant = seed % 3;
+    const spread = 0.04 + Math.random() * 0.03;
 
-    const curve = new THREE.CatmullRomCurve3(points);
-    const tubeGeo = new THREE.TubeGeometry(curve, 6, 0.006, 3, false);
-    const antler = new THREE.Mesh(tubeGeo, mat);
-    this.antlers.add(antler);
+    if (variant === 0) {
+      // Tall simple antler
+      const points: THREE.Vector3[] = [];
+      points.push(new THREE.Vector3(0, 0, 0));
+      points.push(new THREE.Vector3(side * spread, 0.05, 0));
+      points.push(new THREE.Vector3(side * spread * 1.3, 0.09, 0));
+      const curve = new THREE.CatmullRomCurve3(points);
+      const tubeGeo = new THREE.TubeGeometry(curve, 6, 0.006, 3, false);
+      const antler = new THREE.Mesh(tubeGeo, mat);
+      this.antlers.add(antler);
 
-    // Branch
-    const branchPoints: THREE.Vector3[] = [];
-    branchPoints.push(new THREE.Vector3(side * 0.04, 0.04, 0));
-    branchPoints.push(new THREE.Vector3(side * 0.07, 0.045, 0));
-    branchPoints.push(new THREE.Vector3(side * 0.08, 0.04, 0));
-    const branchCurve = new THREE.CatmullRomCurve3(branchPoints);
-    const branchGeo = new THREE.TubeGeometry(branchCurve, 4, 0.004, 3, false);
-    const branch = new THREE.Mesh(branchGeo, mat);
-    this.antlers.add(branch);
+      // Single side branch
+      const branchPoints: THREE.Vector3[] = [];
+      branchPoints.push(new THREE.Vector3(side * spread, 0.05, 0));
+      branchPoints.push(new THREE.Vector3(side * spread * 1.5, 0.055, 0));
+      branchPoints.push(new THREE.Vector3(side * spread * 1.2, 0.045, 0));
+      const branchCurve = new THREE.CatmullRomCurve3(branchPoints);
+      const branchGeo = new THREE.TubeGeometry(branchCurve, 4, 0.004, 3, false);
+      const branch = new THREE.Mesh(branchGeo, mat);
+      this.antlers.add(branch);
+    } else if (variant === 1) {
+      // Wide antler with fork
+      const points: THREE.Vector3[] = [];
+      points.push(new THREE.Vector3(0, 0, 0));
+      points.push(new THREE.Vector3(side * spread * 0.8, 0.04, 0));
+      points.push(new THREE.Vector3(side * spread * 1.5, 0.075, 0));
+      const curve = new THREE.CatmullRomCurve3(points);
+      const tubeGeo = new THREE.TubeGeometry(curve, 6, 0.005, 3, false);
+      const antler = new THREE.Mesh(tubeGeo, mat);
+      this.antlers.add(antler);
+
+      // Back branch
+      const bPoints: THREE.Vector3[] = [];
+      bPoints.push(new THREE.Vector3(side * spread * 0.6, 0.03, 0));
+      bPoints.push(new THREE.Vector3(side * spread * 0.3, 0.06, side * -0.02));
+      bPoints.push(new THREE.Vector3(side * spread * 0.1, 0.08, side * -0.03));
+      const bCurve = new THREE.CatmullRomCurve3(bPoints);
+      const bGeo = new THREE.TubeGeometry(bCurve, 4, 0.004, 3, false);
+      const branch = new THREE.Mesh(bGeo, mat);
+      this.antlers.add(branch);
+    } else {
+      // Short spike antler
+      const points: THREE.Vector3[] = [];
+      points.push(new THREE.Vector3(0, 0, 0));
+      points.push(new THREE.Vector3(side * spread * 0.5, 0.04, 0));
+      points.push(new THREE.Vector3(side * spread * 0.4, 0.065, 0));
+      const curve = new THREE.CatmullRomCurve3(points);
+      const tubeGeo = new THREE.TubeGeometry(curve, 5, 0.006, 3, false);
+      const antler = new THREE.Mesh(tubeGeo, mat);
+      this.antlers.add(antler);
+    }
   }
 
   update(delta: number, playerPosition: THREE.Vector3): void {
@@ -336,14 +462,21 @@ export class Deer {
 
     // Animation - leg movement
     this.legPhase += delta * (this.velocity.length() * 5 + 1);
-    const legSwing = Math.sin(this.legPhase) * 0.08;
-    this.legFL.position.x = -0.12 + legSwing * 0.5;
-    this.legFR.position.x = 0.12 - legSwing * 0.5;
-    this.legBL.position.x = -0.12 - legSwing * 0.5;
-    this.legBR.position.x = 0.12 + legSwing * 0.5;
+    const legSwing = Math.sin(this.legPhase) * 0.06;
+    this.legFL.position.x = this.legBaseX[0] + legSwing;
+    this.legFR.position.x = this.legBaseX[1] - legSwing;
+    this.legBL.position.x = this.legBaseX[2] - legSwing;
+    this.legBR.position.x = this.legBaseX[3] + legSwing;
 
     // Tail wagging
     this.tail.rotation.x = Math.sin(Date.now() * 0.003 + this.index) * 0.1;
+
+    // Feed indicator: show floating "!" above deer ready to be fed
+    const showIndicator = this.state.current === DeerState.Bow && !this.fed;
+    this.feedIndicator.visible = showIndicator;
+    if (showIndicator) {
+      this.feedIndicator.position.y = 1.0 + Math.sin(Date.now() * 0.004) * 0.06;
+    }
 
     // Apply position
     this.group.position.addScaledVector(this.velocity, delta);
@@ -477,9 +610,13 @@ export class Deer {
     // Tail wag faster
     this.tail.rotation.x = Math.sin(Date.now() * 0.01) * 0.3;
 
+    // Head nodding - visible nod up and down
+    this.neck.rotation.x = Math.sin(this.happyBob * 2.5) * 0.3;
+
     if (this.happyTimer <= 0) {
       this.state.current = DeerState.Wander;
       this.group.position.y = 0;
+      this.neck.rotation.x = 0;
     }
   }
 
@@ -510,5 +647,9 @@ export class Deer {
         }
       }
     });
+    // Dispose sprite texture
+    if (this.feedIndicator.material instanceof THREE.SpriteMaterial && this.feedIndicator.material.map) {
+      this.feedIndicator.material.map.dispose();
+    }
   }
 }

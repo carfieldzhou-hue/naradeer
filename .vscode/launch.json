@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Chrome 调试游戏",
+            "url": "http://localhost:5188",
+            "webRoot": "${workspaceFolder}",
+            "sourceMapPathOverrides": {
+                "/__vite/*": "${webRoot}/*",
+                "/src/*": "${webRoot}/src/*"
+            }
+        }
+    ]
+}

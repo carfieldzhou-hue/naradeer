@@ -1,0 +1,21 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "启动 Vite 开发服务器",
+            "type": "npm",
+            "script": "dev",
+            "problemMatcher": [],
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "group": "vite"
+            },
+            "options": {
+                "env": {
+                    "VITE_HOST": "0.0.0.0"
+                }
+            }
+        }
+    ]
+}

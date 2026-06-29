@@ -1,53 +1,53 @@
 <!doctype html>
-<html lang="ja">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#4a7c59" />
-    <title>奈良公園 - 鹿に餌やり 🦌</title>
+    <title>奈良公园 - 喂鹿游戏 🦌</title>
   </head>
   <body>
     <main id="app">
-      <canvas id="game-canvas" aria-label="奈良公園の鹿に餌やりゲーム"></canvas>
+      <canvas id="game-canvas" aria-label="奈良公园喂鹿游戏"></canvas>
 
       <!-- HUD -->
       <section id="hud" aria-live="polite">
         <div class="hud-top">
           <div class="hud-left">
-            <div class="hud-label">🦌 餌やった鹿</div>
+            <div class="hud-label">🦌 已喂鹿数</div>
             <div class="hud-value"><span id="score-count">0</span> / <span id="total-count">8</span></div>
           </div>
           <div class="hud-right">
-            <div class="hud-label">⏱ 時間</div>
+            <div class="hud-label">⏱ 用时</div>
             <div class="hud-value" id="timer-value">00:00</div>
           </div>
         </div>
-        <div id="status-text">鹿を探して餌をあげよう！</div>
+        <div id="status-text">去找小鹿喂食吧！</div>
       </section>
 
       <!-- Feed hint -->
       <div id="feed-hint" class="hidden">
         <div class="hint-icon">🦌</div>
-        <div class="hint-text">[E] で餌をあげる</div>
+        <div class="hint-text">[E] 喂食</div>
       </div>
 
       <!-- Completion overlay -->
       <section id="completion-overlay" class="hidden">
         <div class="completion-card">
           <div class="completion-icon">🎉</div>
-          <h2>全部の鹿に餌をあげた！</h2>
-          <p class="completion-subtitle">ありがとう！また遊ぼうね 🦌</p>
+          <h2>全部小鹿都喂饱啦！</h2>
+          <p class="completion-subtitle">谢谢你！下次再来玩哦 🦌</p>
           <div class="completion-stats">
             <div class="stat">
-              <span class="stat-label">時間</span>
+              <span class="stat-label">用时</span>
               <span class="stat-value" id="completion-time">00:00</span>
             </div>
             <div class="stat">
-              <span class="stat-label">餌やった鹿</span>
+              <span class="stat-label">已喂鹿数</span>
               <span class="stat-value" id="completion-score">0</span>
             </div>
           </div>
-          <button id="restart-button" type="button">もう一度遊ぶ</button>
+          <button id="restart-button" type="button">再玩一次</button>
         </div>
       </section>
 
@@ -57,8 +57,8 @@
           <div id="touch-knob"></div>
         </div>
         <div class="touch-right">
-          <button id="feed-button" type="button" aria-label="餌をあげる">🦌</button>
-          <button id="dash-button" type="button" aria-label="ダッシュ">🏃</button>
+          <button id="feed-button" type="button" aria-label="喂食">🦌</button>
+          <button id="dash-button" type="button" aria-label="冲刺">🏃</button>
         </div>
       </div>
 
@@ -67,13 +67,13 @@
         <div class="title-card">
           <div class="title-deer">🦌</div>
           <h1>奈良公園</h1>
-          <p class="title-sub">鹿にせんべいをあげよう！</p>
+          <p class="title-sub">来给鹿喂仙贝吧！</p>
           <div class="title-instructions">
-            <p>WASD / スティックで移動</p>
-            <p>鹿が近づいたら [E] で餌をあげる</p>
-            <p>鹿にお辞儀されたら餌をあげよう！</p>
+            <p>WASD / 摇杆移动</p>
+            <p>靠近小鹿后按 [E] 喂食</p>
+            <p>小鹿鞠躬时赶紧喂它！</p>
           </div>
-          <button id="start-button" type="button">はじめる</button>
+          <button id="start-button" type="button">开始游戏</button>
         </div>
       </section>
     </main>

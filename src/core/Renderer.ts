@@ -5,13 +5,23 @@ export function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
     canvas,
     antialias: true,
     alpha: false,
-    powerPreference: 'high-performance',
+    powerPreference: 'default',
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+
+  // Handle WebGL context loss gracefully (common on Safari)
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    console.warn('WebGL context lost — attempting to restore…');
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    console.log('WebGL context restored.');
+  });
+
   return renderer;
 }
 
