@@ -4,9 +4,11 @@ import { Loop } from '../core/Loop';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
 import { Player, type ArenaBounds } from '../entities/Player';
 import { Deer, DeerState } from '../entities/Deer';
+import { Obstacle } from '../entities/Obstacle';
 import { AudioSystem } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
 import { DebugTools, type DebugTuning } from '../systems/DebugTools';
+import { Journal } from '../systems/Journal';
 import { Hud } from '../systems/Hud';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park } from '../environment/Park';
@@ -42,6 +44,24 @@ const DEER_SPAWNS = [
   { x: 12, z: -14 },
 ];
 
+// Obstacle definitions - low fences/barriers on paths
+const OBSTACLES = [
+  // Main north-south path
+  { x: -0.5, z: -10, rotation: 0 },
+  { x: 0.5, z: 10, rotation: 0 },
+  // East-west path
+  { x: 8, z: 0.5, rotation: Math.PI / 2 },
+  { x: -8, z: -0.5, rotation: Math.PI / 2 },
+  // Path to shrine
+  { x: 12, z: 4.5, rotation: 0, width: 1.0 },
+  // Cherry avenue
+  { x: 12, z: -9, rotation: 0, width: 0.8 },
+  // Bamboo grove entrance
+  { x: -12, z: -5, rotation: Math.PI / 3, width: 0.8 },
+  // Hill viewpoint path
+  { x: -15, z: 1.5, rotation: 0, width: 0.8 },
+];
+
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -74,6 +94,9 @@ export class Game {
   private totalDeer = 0;
   private elapsed = 0;
   private complete = false;
+  private readonly journal: Journal;
+  private readonly obstacles: Obstacle[] = [];
+  private obstacleNearby = false;
   private feedCooldown = 0;
   private readonly feedKeyPressed = new Set<string>();
   private nearestDeer: Deer | null = null;
@@ -103,6 +126,12 @@ export class Game {
     this.createScene();
     this.createDeer();
     this.totalDeer = this.deerList.length;
+    this.createObstacles();
+
+    // Journal - collect deer info for the encyclopedia
+    this.journal = new Journal(
+      this.deerList.map((d) => d.getDeerInfo()),
+    );
 
     this.hud.setTarget(this.totalDeer);
     this.cameraRig.snapTo(this.player.group.position);
@@ -111,6 +140,8 @@ export class Game {
 
     // Feed key handler (E key)
     this.setupFeedInput();
+    // Journal toggle (Tab key)
+    this.setupJournalInput();
   }
 
   private setupFeedInput(): void {
@@ -177,6 +208,37 @@ export class Game {
       deer.update(delta, this.player.group.position);
     }
 
+    // Obstacle collision
+    this.obstacleNearby = false;
+    const px = this.player.group.position.x;
+    const pz = this.player.group.position.z;
+    const playerRadius = 0.25;
+    for (const obs of this.obstacles) {
+      // Check if player is near obstacle (for jump hint)
+      const nearMargin = 1.5;
+      if (px > obs.minX - nearMargin && px < obs.maxX + nearMargin &&
+          pz > obs.minZ - nearMargin && pz < obs.maxZ + nearMargin) {
+        this.obstacleNearby = true;
+      }
+      // Collision when on ground
+      if (this.player.isOnGround()) {
+        const closestX = Math.max(obs.minX, Math.min(px, obs.maxX));
+        const closestZ = Math.max(obs.minZ, Math.min(pz, obs.maxZ));
+        const dx = px - closestX;
+        const dz = pz - closestZ;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < playerRadius * playerRadius) {
+          // Push player out of obstacle
+          const dist = Math.max(Math.sqrt(distSq), 0.001);
+          const overlap = playerRadius - dist;
+          const pushX = (dx / dist) * overlap;
+          const pushZ = (dz / dist) * overlap;
+          this.player.group.position.x += pushX;
+          this.player.group.position.z += pushZ;
+        }
+      }
+    }
+
     // Find nearest feedable deer
     this.nearestDeer = null;
     let nearestDist = 2.5; // Max feed range
@@ -189,17 +251,11 @@ export class Game {
       }
     }
 
-    // Auto-feed check for deer that are bowing close enough
-    if (this.feedCooldown <= 0 && this.nearestDeer && this.nearestDeer.canBeFed()) {
-      // Auto-feed when deer is bowing and close
-      this.doFeed(this.nearestDeer);
-    }
-
     // Update systems
     this.cameraRig.update(delta, this.player.group.position, this.tuning.cameraLag);
     this.particles.update(delta);
     this.park.update(delta);
-    this.hud.update(this.score, this.totalDeer, this.elapsed, this.complete, this.nearestDeer !== null);
+    this.hud.update(this.score, this.totalDeer, this.elapsed, this.complete, this.nearestDeer !== null, this.journal.getCollectedCount(), this.obstacleNearby && this.player.isOnGround());
 
     // Check win
     if (this.score >= this.totalDeer && !this.complete) {
@@ -218,11 +274,21 @@ export class Game {
     }
   }
 
+  private setupJournalInput(): void {
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Tab') {
+        e.preventDefault();
+        this.journal.toggle();
+      }
+    });
+  }
+
   private doFeed(deer: Deer): void {
     deer.startEating();
     this.score += 1;
     this.feedCooldown = 0.3;
     this.audio.feed();
+    this.journal.markCollected(deer.index);
 
     // Particle effects
     const deerPos = deer.group.position.clone();
@@ -278,6 +344,14 @@ export class Game {
 
     // Add player to scene
     this.scene.add(this.player.group);
+  }
+
+  private createObstacles(): void {
+    for (const def of OBSTACLES) {
+      const obs = new Obstacle(def);
+      this.obstacles.push(obs);
+      this.scene.add(obs.group);
+    }
   }
 
   private createDeer(): void {

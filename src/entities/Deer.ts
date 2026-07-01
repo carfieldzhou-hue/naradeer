@@ -19,6 +19,13 @@ export enum DeerPersonality {
   Lazy = 'lazy',
 }
 
+export enum DeerRarity {
+  Common = 'common',
+  Uncommon = 'uncommon',
+  Rare = 'rare',
+  Legendary = 'legendary',
+}
+
 const PERSONALITY_BY_INDEX: DeerPersonality[] = [
   DeerPersonality.Playful,
   DeerPersonality.Shy,
@@ -41,6 +48,36 @@ const PERSONALITY_BY_INDEX: DeerPersonality[] = [
 const SPECIAL_VARIANT_BY_INDEX: string[] = [
   'none', 'none', 'none', 'none', 'none', 'none', 'none', 'golden',
   'none', 'none', 'none', 'none', 'none', 'butterfly', 'none', 'none',
+];
+
+const RARITY_BY_INDEX: DeerRarity[] = [
+  DeerRarity.Common,     // 0  Playful
+  DeerRarity.Common,     // 1  Shy
+  DeerRarity.Common,     // 2  Friendly
+  DeerRarity.Common,     // 3  Lazy
+  DeerRarity.Common,     // 4  Normal
+  DeerRarity.Uncommon,   // 5  Shy
+  DeerRarity.Uncommon,   // 6  Friendly
+  DeerRarity.Rare,       // 7  Playful (golden)
+  DeerRarity.Common,     // 8  Normal
+  DeerRarity.Uncommon,   // 9  Lazy
+  DeerRarity.Uncommon,   // 10 Shy
+  DeerRarity.Uncommon,   // 11 Friendly
+  DeerRarity.Rare,       // 12 Playful
+  DeerRarity.Rare,       // 13 Normal (butterfly)
+  DeerRarity.Rare,       // 14 Lazy
+  DeerRarity.Legendary,  // 15 Shy
+];
+
+// Deterministic gender for consistent journal
+const GENDER_BY_INDEX: number[] = [
+  0, 0, 1, 1, 0, 1, 0, 1,
+  0, 1, 0, 0, 1, 0, 1, 1,  // 0=female, 1=male
+];
+
+const ANTLERS_BY_INDEX: boolean[] = [
+  false, false, true, true, false, true, false, true,
+  false, true, false, false, true, false, true, true,
 ];
 
 export interface DeerTuning {
@@ -155,6 +192,7 @@ export class Deer {
   fed = false;
 
   readonly personality: DeerPersonality;
+  readonly rarity: DeerRarity;
   readonly specialVariant: string;
   private friendlyFollowTimer = 0;
   private readonly prevPlayerPos = new THREE.Vector3();
@@ -169,11 +207,12 @@ export class Deer {
     this.wanderTarget = position.clone();
     this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Normal;
     this.specialVariant = SPECIAL_VARIANT_BY_INDEX[index] ?? 'none';
+    this.rarity = RARITY_BY_INDEX[index] ?? DeerRarity.Common;
+    this.isMale = GENDER_BY_INDEX[index] === 1;
+    this.hasAntlers = ANTLERS_BY_INDEX[index];
 
     // ---- Visual variety ----
     this.scaleFactor = 0.82 + Math.random() * 0.36; // 0.82 ~ 1.18
-    this.isMale = Math.random() > 0.45;
-    this.hasAntlers = this.isMale && Math.random() > 0.2;
 
     const bodyWidth = 0.38 + Math.random() * 0.18;
     const bodyHeight = 0.24 + Math.random() * 0.14;
@@ -577,7 +616,14 @@ export class Deer {
     const distToTarget = toTarget.length();
 
     if (distToTarget < 0.3) {
-      const wr = this.tuning.wanderRadius * (this.personality === DeerPersonality.Lazy ? 0.5 : 1);
+      // Rarity: rarer deer wander further from home, harder to find
+      let rarityWanderMult = 1;
+      switch (this.rarity) {
+        case DeerRarity.Uncommon: rarityWanderMult = 1.4; break;
+        case DeerRarity.Rare: rarityWanderMult = 1.8; break;
+        case DeerRarity.Legendary: rarityWanderMult = 2.5; break;
+      }
+      const wr = this.tuning.wanderRadius * (this.personality === DeerPersonality.Lazy ? 0.5 : 1) * rarityWanderMult;
       this.wanderTarget.set(
         this.homePosition.x + (Math.random() - 0.5) * wr,
         0,
@@ -655,7 +701,12 @@ export class Deer {
       return;
     }
 
-    if (this.personality === DeerPersonality.Shy && this.playerVel.length() > 4) {
+    // Rarer deer get spooked more easily
+    const rarityFleeThreshold = this.rarity === DeerRarity.Legendary ? 1.5
+      : this.rarity === DeerRarity.Rare ? 2.5
+      : this.rarity === DeerRarity.Uncommon ? 3.5
+      : 4;
+    if ((this.personality === DeerPersonality.Shy || this.rarity === DeerRarity.Legendary) && this.playerVel.length() > rarityFleeThreshold) {
       this.state.current = DeerState.Wander;
       const fleeDir = new THREE.Vector3().copy(this.group.position).sub(playerPosition);
       fleeDir.y = 0;
@@ -766,7 +817,7 @@ export class Deer {
     return this.state.current === DeerState.Happy;
   }
 
-  getDeerInfo(): { index: number; personality: DeerPersonality; specialVariant: string; fed: boolean; name: string } {
+  getDeerInfo(): { index: number; personality: DeerPersonality; rarity: DeerRarity; specialVariant: string; fed: boolean; name: string; isMale: boolean; hasAntlers: boolean } {
     let name: string;
     if (this.specialVariant === 'golden') {
       name = '小金子';
@@ -791,11 +842,26 @@ export class Deer {
           break;
       }
     }
-    return { index: this.index, personality: this.personality, specialVariant: this.specialVariant, fed: this.fed, name: name! };
+    return {
+      index: this.index,
+      personality: this.personality,
+      rarity: this.rarity,
+      specialVariant: this.specialVariant,
+      fed: this.fed,
+      name: name!,
+      isMale: this.isMale,
+      hasAntlers: this.hasAntlers,
+    };
   }
 
   private getDetectionRange(): number {
     let range = this.tuning.detectionRange;
+    // Rarity: rarer deer are less likely to notice / approach the player
+    switch (this.rarity) {
+      case DeerRarity.Uncommon: range *= 0.8; break;
+      case DeerRarity.Rare: range *= 0.6; break;
+      case DeerRarity.Legendary: range *= 0.4; break;
+    }
     if (this.personality === DeerPersonality.Shy) range *= 1.3;
     if (this.personality === DeerPersonality.Friendly) range *= 1.5;
     return range;

@@ -6,7 +6,7 @@ export class CameraRig {
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
-    private readonly offset = new THREE.Vector3(0, 6, 7),
+    private readonly offset = new THREE.Vector3(0, 2.5, 3.8),
   ) {}
 
   snapTo(target: THREE.Vector3): void {

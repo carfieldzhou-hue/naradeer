@@ -21,17 +21,21 @@ export class InputController {
   };
 
   private dashDown = false;
+  private jumpPressed = false;
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     this.keys.add(event.code);
-    if (event.code === 'Space' || event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+    if (event.code === 'Space') {
+      this.jumpPressed = true;
+    }
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
       this.dashDown = true;
     }
   };
 
   private readonly onKeyUp = (event: KeyboardEvent) => {
     this.keys.delete(event.code);
-    if (event.code === 'Space' || event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
       this.dashDown = false;
     }
   };
@@ -108,6 +112,14 @@ export class InputController {
 
   isDashHeld(): boolean {
     return this.dashDown;
+  }
+
+  consumeJump(): boolean {
+    if (this.jumpPressed) {
+      this.jumpPressed = false;
+      return true;
+    }
+    return false;
   }
 
   dispose(): void {

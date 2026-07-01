@@ -134,6 +134,31 @@ body {
   50% { transform: translateX(-50%) scale(1.05); opacity: 0.85; }
 }
 
+/* ===== Jump Hint ===== */
+#jump-hint {
+  position: absolute;
+  bottom: 38%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  pointer-events: none;
+}
+#jump-hint.hidden {
+  display: none;
+}
+#jump-hint .hint-text {
+  font-size: 0.8rem;
+  color: #a5d6a7;
+}
+
 /* ===== Completion Overlay ===== */
 #completion-overlay {
   position: absolute;
@@ -408,6 +433,28 @@ body {
   font-size: 0.6rem;
   color: #ffd54f;
   font-weight: 600;
+}
+.journal-card .deer-rarity {
+  font-size: 0.7rem;
+  margin-bottom: 2px;
+  letter-spacing: 1px;
+}
+.journal-card .deer-rarity-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.journal-card .deer-badge {
+  font-size: 0.6rem;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  display: inline-block;
+}
+.journal-card.collected .deer-badge {
+  background: rgba(255, 213, 79, 0.15);
+  color: #ffd54f;
 }
 
 #journal-hint {

@@ -65,6 +65,12 @@ export class Player {
 
   private walkPhase = 0;
 
+  // Jump physics
+  private verticalVelocity = 0;
+  private onGround = true;
+  private readonly jumpVelocity = 2.8;
+  private readonly gravity = -14;
+
   constructor() {
     // Body (torso)
     const torsoGeo = new THREE.CylinderGeometry(0.15, 0.12, 0.3, 8);
@@ -219,6 +225,25 @@ export class Player {
 
     const smoothing = 1 - Math.exp(-tuning.acceleration * delta);
     this.velocity.lerp(this.targetVelocity, smoothing);
+
+    // Jump
+    if (input.consumeJump() && this.onGround) {
+      this.verticalVelocity = this.jumpVelocity;
+      this.onGround = false;
+    }
+
+    // Gravity
+    if (!this.onGround) {
+      this.verticalVelocity += this.gravity * delta;
+      this.group.position.y += this.verticalVelocity * delta;
+      // Ground collision
+      if (this.group.position.y <= 0) {
+        this.group.position.y = 0;
+        this.verticalVelocity = 0;
+        this.onGround = true;
+      }
+    }
+
     this.group.position.addScaledVector(this.velocity, delta);
 
     // Bounds
@@ -229,7 +254,7 @@ export class Player {
 
     // Face movement direction
     if (this.velocity.lengthSq() > 0.001) {
-      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
+      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
       let diff = targetAngle - this.group.rotation.y;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -250,6 +275,10 @@ export class Player {
 
     // Slight body bob
     this.bodyGroup.position.y = 0.06 + (moving ? Math.abs(Math.sin(this.walkPhase)) * 0.03 : 0);
+  }
+
+  isOnGround(): boolean {
+    return this.onGround;
   }
 
   getFeedPosition(): THREE.Vector3 {

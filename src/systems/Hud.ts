@@ -4,6 +4,7 @@ export class Hud {
   private readonly timerValue = this.getElement('#timer-value');
   private readonly statusText = this.getElement('#status-text');
   private readonly feedHint = this.getElement('#feed-hint');
+  private readonly jumpHint = this.getElement('#jump-hint');
   private readonly completionOverlay = this.getElement('#completion-overlay');
   private readonly completionTime = this.getElement('#completion-time');
   private readonly completionScore = this.getElement('#completion-score');
@@ -18,6 +19,8 @@ export class Hud {
     elapsed: number,
     complete: boolean,
     deerNearby: boolean,
+    collectedCount?: number,
+    obstacleNearby?: boolean,
   ): void {
     // Score
     this.scoreCount.textContent = String(score);
@@ -31,7 +34,8 @@ export class Hud {
     if (complete) {
       this.statusText.textContent = '✨ 所有的鹿都喂饱了！ ✨';
     } else {
-      this.statusText.textContent = `找鹿喂食 · ${score}/${target}`;
+      const coll = collectedCount !== undefined ? ` · 图鉴 ${collectedCount}/${target}` : '';
+      this.statusText.textContent = `找鹿喂食 · ${score}/${target}${coll}`;
     }
 
     // Feed hint
@@ -44,11 +48,24 @@ export class Hud {
       this.feedHint.classList.add('hidden');
     }
 
+    // Jump hint
+    if (complete || !obstacleNearby) {
+      this.jumpHint.classList.add('hidden');
+    } else {
+      this.jumpHint.classList.remove('hidden');
+    }
+
     // Completion overlay
     if (complete && !this.completionOverlay.classList.contains('show')) {
       this.completionOverlay.classList.add('show');
       this.completionTime.textContent = this.timerValue.textContent;
       this.completionScore.textContent = String(score);
+    }
+
+    // Journal hint
+    const journalHint = this.getElement('#journal-hint');
+    if (!complete && collectedCount !== undefined && collectedCount > 0 && journalHint) {
+      journalHint.classList.remove('hidden');
     }
   }
 
