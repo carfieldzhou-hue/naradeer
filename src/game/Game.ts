@@ -12,12 +12,13 @@ import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park } from '../environment/Park';
 
 const PARK_BOUNDS: ArenaBounds = {
-  halfWidth: 14,
-  halfDepth: 10,
+  halfWidth: 24,
+  halfDepth: 18,
 };
 
-// Deer spawn positions
+// Deer spawn positions (expanded for larger map)
 const DEER_SPAWNS = [
+  // Main plaza area
   { x: -5, z: -3 },
   { x: 4, z: -5 },
   { x: -3, z: 4 },
@@ -26,6 +27,19 @@ const DEER_SPAWNS = [
   { x: 2, z: -2 },
   { x: -4, z: -6 },
   { x: 0, z: 5 },
+  // Pond garden area
+  { x: -8, z: 9 },
+  { x: 0, z: 12 },
+  // Shrine corner
+  { x: 14, z: 8 },
+  { x: 18, z: 4 },
+  // Bamboo grove
+  { x: -10, z: -10 },
+  // Hill viewpoint
+  { x: -16, z: 0 },
+  // Cherry avenue
+  { x: 10, z: -8 },
+  { x: 12, z: -14 },
 ];
 
 export class Game {
@@ -232,7 +246,7 @@ export class Game {
   private createScene(): void {
     // Sky - warm Japanese sunset gradient
     this.scene.background = new THREE.Color('#87ceeb');
-    this.scene.fog = new THREE.Fog('#c8e6c9', 25, 50);
+    this.scene.fog = new THREE.Fog('#c8e6c9', 30, 65);
 
     // ---- Lighting ----
     const hemisphere = new THREE.HemisphereLight('#b3d9ff', '#8d6e63', 1.2);
@@ -245,10 +259,10 @@ export class Game {
     sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.camera.near = 0.5;
     sun.shadow.camera.far = 40;
-    sun.shadow.camera.left = -18;
-    sun.shadow.camera.right = 18;
-    sun.shadow.camera.top = 15;
-    sun.shadow.camera.bottom = -15;
+    sun.shadow.camera.left = -28;
+    sun.shadow.camera.right = 28;
+    sun.shadow.camera.top = 22;
+    sun.shadow.camera.bottom = -22;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
 

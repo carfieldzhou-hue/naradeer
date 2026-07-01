@@ -11,6 +11,38 @@ export enum DeerState {
   Flee = 'flee',
 }
 
+export enum DeerPersonality {
+  Normal = 'normal',
+  Shy = 'shy',
+  Friendly = 'friendly',
+  Playful = 'playful',
+  Lazy = 'lazy',
+}
+
+const PERSONALITY_BY_INDEX: DeerPersonality[] = [
+  DeerPersonality.Playful,
+  DeerPersonality.Shy,
+  DeerPersonality.Friendly,
+  DeerPersonality.Lazy,
+  DeerPersonality.Normal,
+  DeerPersonality.Shy,
+  DeerPersonality.Friendly,
+  DeerPersonality.Playful,
+  DeerPersonality.Normal,
+  DeerPersonality.Lazy,
+  DeerPersonality.Shy,
+  DeerPersonality.Friendly,
+  DeerPersonality.Playful,
+  DeerPersonality.Normal,
+  DeerPersonality.Lazy,
+  DeerPersonality.Shy,
+];
+
+const SPECIAL_VARIANT_BY_INDEX: string[] = [
+  'none', 'none', 'none', 'none', 'none', 'none', 'none', 'golden',
+  'none', 'none', 'none', 'none', 'none', 'butterfly', 'none', 'none',
+];
+
 export interface DeerTuning {
   wanderRadius: number;
   wanderSpeed: number;
@@ -122,11 +154,21 @@ export class Deer {
 
   fed = false;
 
+  readonly personality: DeerPersonality;
+  readonly specialVariant: string;
+  private friendlyFollowTimer = 0;
+  private readonly prevPlayerPos = new THREE.Vector3();
+  private readonly playerVel = new THREE.Vector3();
+  private goldenGlow?: THREE.Sprite;
+  private butterflyWingsGroup?: THREE.Group;
+
   constructor(index: number, position: THREE.Vector3, tuning?: Partial<DeerTuning>) {
     this.index = index;
     this.tuning = { ...DEFAULT_TUNING, ...tuning };
     this.homePosition = position.clone();
     this.wanderTarget = position.clone();
+    this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Normal;
+    this.specialVariant = SPECIAL_VARIANT_BY_INDEX[index] ?? 'none';
 
     // ---- Visual variety ----
     this.scaleFactor = 0.82 + Math.random() * 0.36; // 0.82 ~ 1.18
@@ -369,6 +411,46 @@ export class Deer {
     this.feedIndicator.visible = false;
     this.group.add(this.feedIndicator);
 
+    if (this.specialVariant === 'golden') {
+      bodyMat.emissive = new THREE.Color('#ffd700');
+      bodyMat.emissiveIntensity = 0.15;
+      const gCanvas = document.createElement('canvas');
+      gCanvas.width = 128;
+      gCanvas.height = 128;
+      const gCtx = gCanvas.getContext('2d')!;
+      const grad = gCtx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, 'rgba(255, 215, 0, 0.35)');
+      grad.addColorStop(0.3, 'rgba(255, 215, 0, 0.12)');
+      grad.addColorStop(1, 'rgba(255, 215, 0, 0)');
+      gCtx.fillStyle = grad;
+      gCtx.fillRect(0, 0, 128, 128);
+      const glowTex = new THREE.CanvasTexture(gCanvas);
+      this.goldenGlow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      this.goldenGlow.scale.set(2.5, 2.5, 1);
+      this.goldenGlow.position.y = 0.02;
+      this.group.add(this.goldenGlow);
+    }
+    if (this.specialVariant === 'butterfly') {
+      const wingShape = new THREE.Shape();
+      wingShape.moveTo(0, 0);
+      wingShape.lineTo(0.13, 0.05);
+      wingShape.lineTo(0, 0.09);
+      wingShape.closePath();
+      const wMat1 = new THREE.MeshBasicMaterial({ color: 0xff69b4, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
+      const wMat2 = new THREE.MeshBasicMaterial({ color: 0x9b59b6, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
+      const wg = new THREE.ShapeGeometry(wingShape);
+      const w1 = new THREE.Mesh(wg, wMat1);
+      w1.position.set(-0.18, 0, 0);
+      const w2 = new THREE.Mesh(wg.clone(), wMat2);
+      w2.position.set(0.18, 0, 0);
+      this.butterflyWingsGroup = new THREE.Group();
+      this.butterflyWingsGroup.add(w1, w2);
+      this.butterflyWingsGroup.position.set(0, 0.55, -0.05);
+      this.group.add(this.butterflyWingsGroup);
+    }
+
     // Apply scale to the whole deer
     this.group.scale.set(this.scaleFactor, this.scaleFactor, this.scaleFactor);
 
@@ -435,6 +517,8 @@ export class Deer {
 
   update(delta: number, playerPosition: THREE.Vector3): void {
     const distToPlayer = this.group.position.distanceTo(playerPosition);
+    this.playerVel.copy(playerPosition).sub(this.prevPlayerPos).divideScalar(Math.max(delta, 0.001));
+    this.prevPlayerPos.copy(playerPosition);
 
     // State machine
     switch (this.state.current) {
@@ -461,7 +545,7 @@ export class Deer {
     }
 
     // Animation - leg movement
-    this.legPhase += delta * (this.velocity.length() * 5 + 1);
+    this.legPhase += delta * (this.velocity.length() * 5 + 1) * (this.personality === DeerPersonality.Playful ? 1.5 : 1);
     const legSwing = Math.sin(this.legPhase) * 0.06;
     this.legFL.position.x = this.legBaseX[0] + legSwing;
     this.legFR.position.x = this.legBaseX[1] - legSwing;
@@ -478,6 +562,11 @@ export class Deer {
       this.feedIndicator.position.y = 1.0 + Math.sin(Date.now() * 0.004) * 0.06;
     }
 
+    if (this.butterflyWingsGroup) {
+      this.butterflyWingsGroup.rotation.y += delta * 1.5;
+      this.butterflyWingsGroup.position.y = 0.55 + Math.sin(Date.now() * 0.003) * 0.04;
+    }
+
     // Apply position
     this.group.position.addScaledVector(this.velocity, delta);
   }
@@ -488,28 +577,29 @@ export class Deer {
     const distToTarget = toTarget.length();
 
     if (distToTarget < 0.3) {
-      // Pick new wander target
+      const wr = this.tuning.wanderRadius * (this.personality === DeerPersonality.Lazy ? 0.5 : 1);
       this.wanderTarget.set(
-        this.homePosition.x + (Math.random() - 0.5) * this.tuning.wanderRadius,
+        this.homePosition.x + (Math.random() - 0.5) * wr,
         0,
-        this.homePosition.z + (Math.random() - 0.5) * this.tuning.wanderRadius,
+        this.homePosition.z + (Math.random() - 0.5) * wr,
       );
     }
 
     // Check if player is close enough to approach
-    if (distToPlayer < this.tuning.detectionRange && !this.fed) {
+    if (distToPlayer < this.getDetectionRange() && !this.fed) {
       this.state.current = DeerState.Approach;
       return;
     }
 
     // Move toward target
-    const speed = this.tuning.wanderSpeed * (0.5 + Math.random() * 0.5);
+    const wanderSpeedMult = this.personality === DeerPersonality.Playful ? 1.5 : this.personality === DeerPersonality.Lazy ? 0.4 : 1;
+    const speed = this.tuning.wanderSpeed * wanderSpeedMult * (0.5 + Math.random() * 0.5);
     toTarget.normalize();
     this.velocity.lerp(toTarget.multiplyScalar(speed), delta * 3);
 
     // Face movement direction
     if (this.velocity.lengthSq() > 0.01) {
-      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
+      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
       let diff = targetAngle - this.group.rotation.y;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -530,7 +620,7 @@ export class Deer {
     // Head bob (grazing)
     this.neck.rotation.x = Math.sin(Date.now() * 0.002) * 0.05;
 
-    if (_distToPlayer < this.tuning.detectionRange && !this.fed) {
+    if (_distToPlayer < this.getDetectionRange() && !this.fed) {
       this.state.current = DeerState.Approach;
       return;
     }
@@ -541,6 +631,39 @@ export class Deer {
   }
 
   private updateApproach(delta: number, playerPosition: THREE.Vector3, _distToPlayer: number): void {
+    if (this.friendlyFollowTimer > 0) {
+      this.friendlyFollowTimer -= delta;
+      if (this.friendlyFollowTimer <= 0) {
+        this.state.current = DeerState.Wander;
+        this.velocity.set(0, 0, 0);
+        return;
+      }
+      const followDist = this.group.position.distanceTo(playerPosition);
+      if (followDist > 2.5) {
+        const toPlayer = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
+        toPlayer.y = 0;
+        toPlayer.normalize();
+        this.velocity.lerp(toPlayer.multiplyScalar(this.tuning.approachSpeed * 1.3), delta * 3);
+        const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
+        let diff = targetAngle - this.group.rotation.y;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        this.group.rotation.y += diff * delta * 5;
+      } else {
+        this.velocity.lerp(new THREE.Vector3(), delta * 3);
+      }
+      return;
+    }
+
+    if (this.personality === DeerPersonality.Shy && this.playerVel.length() > 4) {
+      this.state.current = DeerState.Wander;
+      const fleeDir = new THREE.Vector3().copy(this.group.position).sub(playerPosition);
+      fleeDir.y = 0;
+      fleeDir.normalize();
+      this.velocity.copy(fleeDir.multiplyScalar(this.tuning.wanderSpeed * 2));
+      return;
+    }
+
     // Walk toward player
     const toPlayer = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
     toPlayer.y = 0;
@@ -549,22 +672,24 @@ export class Deer {
     // Stop at a comfortable distance
     if (dist < 1.2) {
       this.state.current = DeerState.Bow;
-      this.state.timer = this.tuning.bowDuration;
+      const bowMult = this.personality === DeerPersonality.Playful ? 0.6 : this.personality === DeerPersonality.Lazy ? 1.8 : 1;
+      this.state.timer = this.tuning.bowDuration * bowMult;
       this.velocity.set(0, 0, 0);
       return;
     }
 
-    if (dist > this.tuning.detectionRange + 2) {
+    if (dist > this.getDetectionRange() + 2) {
       this.state.current = DeerState.Wander;
       return;
     }
 
-    const speed = this.tuning.approachSpeed * Math.min(dist / 3, 1);
+    const approachSpeedMult = this.personality === DeerPersonality.Shy ? 0.7 : this.personality === DeerPersonality.Friendly ? 1.3 : 1;
+    const speed = this.tuning.approachSpeed * approachSpeedMult * Math.min(dist / 3, 1);
     toPlayer.normalize();
     this.velocity.lerp(toPlayer.multiplyScalar(speed), delta * 3);
 
     // Face player
-    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
+    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
     let diff = targetAngle - this.group.rotation.y;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
@@ -614,7 +739,12 @@ export class Deer {
     this.neck.rotation.x = Math.sin(this.happyBob * 2.5) * 0.3;
 
     if (this.happyTimer <= 0) {
-      this.state.current = DeerState.Wander;
+      if (this.personality === DeerPersonality.Friendly) {
+        this.state.current = DeerState.Approach;
+        this.friendlyFollowTimer = 3;
+      } else {
+        this.state.current = DeerState.Wander;
+      }
       this.group.position.y = 0;
       this.neck.rotation.x = 0;
     }
@@ -636,6 +766,41 @@ export class Deer {
     return this.state.current === DeerState.Happy;
   }
 
+  getDeerInfo(): { index: number; personality: DeerPersonality; specialVariant: string; fed: boolean; name: string } {
+    let name: string;
+    if (this.specialVariant === 'golden') {
+      name = '小金子';
+    } else if (this.specialVariant === 'butterfly') {
+      name = '花仙子';
+    } else {
+      switch (this.personality) {
+        case DeerPersonality.Normal:
+          name = '小鹿';
+          break;
+        case DeerPersonality.Shy:
+          name = '小害羞';
+          break;
+        case DeerPersonality.Friendly:
+          name = '小跟班';
+          break;
+        case DeerPersonality.Playful:
+          name = '小跳跳';
+          break;
+        case DeerPersonality.Lazy:
+          name = '小懒懒';
+          break;
+      }
+    }
+    return { index: this.index, personality: this.personality, specialVariant: this.specialVariant, fed: this.fed, name: name! };
+  }
+
+  private getDetectionRange(): number {
+    let range = this.tuning.detectionRange;
+    if (this.personality === DeerPersonality.Shy) range *= 1.3;
+    if (this.personality === DeerPersonality.Friendly) range *= 1.5;
+    return range;
+  }
+
   dispose(): void {
     this.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
@@ -647,9 +812,12 @@ export class Deer {
         }
       }
     });
-    // Dispose sprite texture
     if (this.feedIndicator.material instanceof THREE.SpriteMaterial && this.feedIndicator.material.map) {
       this.feedIndicator.material.map.dispose();
+    }
+    if (this.goldenGlow) {
+      this.goldenGlow.material.dispose();
+      if (this.goldenGlow.material.map) this.goldenGlow.material.map.dispose();
     }
   }
 }

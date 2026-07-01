@@ -299,6 +299,130 @@ body {
   cursor: pointer;
 }
 
+/* ===== Journal Overlay ===== */
+#journal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+#journal-overlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.journal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+.journal-panel {
+  position: relative;
+  width: min(640px, 92vw);
+  max-height: min(80vh, 600px);
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.journal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.journal-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.journal-progress {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  font-weight: 600;
+}
+#journal-close {
+  background: rgba(255,255,255,0.1);
+  border: none;
+  border-radius: 6px;
+  color: #f6f1df;
+  font-size: 1rem;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+#journal-close:hover {
+  background: rgba(255,255,255,0.2);
+}
+.journal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+.journal-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+.journal-card.collected {
+  background: rgba(255, 213, 79, 0.08);
+  border-color: rgba(255, 213, 79, 0.2);
+}
+.journal-card .deer-icon {
+  font-size: 1.8rem;
+  margin-bottom: 4px;
+  filter: grayscale(1) opacity(0.3);
+  transition: filter 0.3s;
+}
+.journal-card.collected .deer-icon {
+  filter: none;
+}
+.journal-card .deer-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.journal-card .deer-personality {
+  font-size: 0.65rem;
+  opacity: 0.6;
+}
+.journal-card .deer-special {
+  font-size: 0.6rem;
+  color: #ffd54f;
+  font-weight: 600;
+}
+
+#journal-hint {
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  text-align: center;
+  opacity: 0.7;
+  letter-spacing: 0.3px;
+}
+#journal-hint.hidden {
+  display: none;
+}
+
 /* ===== Title Overlay ===== */
 #title-overlay {
   position: absolute;
