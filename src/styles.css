@@ -337,6 +337,10 @@ body {
 }
 
 /* ===== Money Tree Hint ===== */
+#money-tree-hint.hidden {
+  display: none;
+}
+
 #money-tree-hint {
   position: absolute;
   bottom: 100px;
@@ -356,6 +360,10 @@ body {
 }
 
 /* ===== Share Button ===== */
+#share-button.hidden {
+  display: none;
+}
+
 .share-btn {
   position: absolute;
   top: 80px;

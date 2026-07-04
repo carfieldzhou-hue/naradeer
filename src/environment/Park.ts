@@ -7,8 +7,6 @@ export interface ParkBounds {
   halfDepth: number;
 }
 
-const SPREAD = 3.5; // Scale factor for zone positions relative to original 24x18 map
-
 export interface MoneyTreeInfo {
   group: THREE.Group;
   position: THREE.Vector3;
@@ -18,22 +16,28 @@ export interface MoneyTreeInfo {
 
 export class Park {
   readonly group = new THREE.Group();
-  readonly trees: Tree[] = [];
-  readonly lanterns: StoneLantern[] = [];
-  readonly toriiGates: ToriiGate[] = [];
-  readonly temples: Temple[] = [];
-  readonly bamboos: Bamboo[] = [];
-  readonly bells: TempleBell[] = [];
-  readonly koiFish: KoiFish[] = [];
-  readonly viewingPlatforms: ViewingPlatform[] = [];
-  private readonly groundMesh: THREE.Mesh;
-  private readonly groundTexture: THREE.CanvasTexture;
-  private readonly waterMeshes: THREE.Mesh[] = [];
+  trees: Tree[] = [];
+  lanterns: StoneLantern[] = [];
+  toriiGates: ToriiGate[] = [];
+  temples: Temple[] = [];
+  bamboos: Bamboo[] = [];
+  bells: TempleBell[] = [];
+  koiFish: KoiFish[] = [];
+  viewingPlatforms: ViewingPlatform[] = [];
+  private groundMesh!: THREE.Mesh;
+  private groundTexture!: THREE.CanvasTexture;
+  private waterMeshes: THREE.Mesh[] = [];
   private waterTime = 0;
-  private readonly flowerMeshes: THREE.Mesh[] = [];
+  private flowerMeshes: THREE.Mesh[] = [];
+  private spread = 3.5;
 
   constructor(_scene: THREE.Scene, bounds: ParkBounds) {
-    // ---- Ground ----
+    this._init(bounds);
+  }
+
+  private _init(bounds: ParkBounds): void {
+    this.spread = Math.min(bounds.halfWidth / 12, bounds.halfDepth / 9) * 0.35;
+
     this.groundTexture = this._groundTexture();
     this.groundTexture.wrapS = THREE.RepeatWrapping;
     this.groundTexture.wrapT = THREE.RepeatWrapping;
@@ -48,33 +52,47 @@ export class Park {
     });
 
     this.groundMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(bounds.halfWidth * 2, bounds.halfDepth * 2, 1, 1),
+      new THREE.PlaneGeometry(bounds.halfWidth * 2, bounds.halfDepth * 2, Math.ceil(bounds.halfWidth / 20), Math.ceil(bounds.halfDepth / 20)),
       groundMat,
     );
     this.groundMesh.rotation.x = -Math.PI / 2;
     this.groundMesh.receiveShadow = true;
     this.group.add(this.groundMesh);
 
-    // ---- Path network ----
     this._createPaths(bounds);
-
-    // ---- Zones (scaled by SPREAD) ----
     this._buildMainPlaza(bounds);
     this._buildPondGarden(bounds);
     this._buildShrineCorner(bounds);
     this._buildBambooGrove(bounds);
     this._buildHillViewpoint(bounds);
     this._buildCherryAvenue(bounds);
-
-    // ---- Scattered decorations across full map ----
     this._placeScatteredTrees(bounds);
     this._placeFlowers(bounds);
     this._placeBushes(bounds);
     this._placeExtraLanterns(bounds);
   }
 
+  regenerate(bounds: ParkBounds): void {
+    this.dispose();
+    for (const child of [...this.group.children]) {
+      this.group.remove(child);
+    }
+    this.trees = [];
+    this.lanterns = [];
+    this.toriiGates = [];
+    this.temples = [];
+    this.bamboos = [];
+    this.bells = [];
+    this.koiFish = [];
+    this.viewingPlatforms = [];
+    this.waterMeshes = [];
+    this.flowerMeshes = [];
+    this.waterTime = 0;
+    this._init(bounds);
+  }
+
   private zx(x: number, z: number): { x: number; z: number } {
-    return { x: x * SPREAD, z: z * SPREAD };
+    return { x: x * this.spread, z: z * this.spread };
   }
 
   private _groundTexture(): THREE.CanvasTexture {
@@ -108,7 +126,6 @@ export class Park {
       metalness: 0,
     });
 
-    // Main north-south path
     const mainPath = new THREE.Mesh(
       new THREE.PlaneGeometry(1.4, bounds.halfDepth * 2),
       pathMat,
@@ -118,7 +135,6 @@ export class Park {
     mainPath.receiveShadow = true;
     this.group.add(mainPath);
 
-    // Main east-west path
     const crossPath = new THREE.Mesh(
       new THREE.PlaneGeometry(bounds.halfWidth * 2, 1.4),
       pathMat,
@@ -128,66 +144,43 @@ export class Park {
     crossPath.receiveShadow = true;
     this.group.add(crossPath);
 
-    // Path to pond
     const pond = this.zx(-4, 12);
-    const pondPath = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 12),
-      pathMat,
-    );
+    const pondPath = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 12 * this.spread / 3.5), pathMat);
     pondPath.rotation.x = -Math.PI / 2;
     pondPath.position.set(pond.x, 0.01, pond.z);
     pondPath.receiveShadow = true;
     this.group.add(pondPath);
 
-    // Path to shrine
     const shrine = this.zx(14, 4);
-    const shrinePath = new THREE.Mesh(
-      new THREE.PlaneGeometry(16, 1.0),
-      pathMat,
-    );
+    const shrinePath = new THREE.Mesh(new THREE.PlaneGeometry(16 * this.spread / 3.5, 1.0), pathMat);
     shrinePath.rotation.x = -Math.PI / 2;
     shrinePath.position.set(shrine.x, 0.01, shrine.z);
     shrinePath.receiveShadow = true;
     this.group.add(shrinePath);
 
-    // Path to bamboo grove
     const bamboo = this.zx(-14, -7);
-    const bambooPath = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 16),
-      pathMat,
-    );
+    const bambooPath = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 16 * this.spread / 3.5), pathMat);
     bambooPath.rotation.x = -Math.PI / 2;
     bambooPath.position.set(bamboo.x, 0.01, bamboo.z);
     bambooPath.receiveShadow = true;
     this.group.add(bambooPath);
 
-    // Path to hill viewpoint
     const hill = this.zx(-17, 2);
-    const hillPath = new THREE.Mesh(
-      new THREE.PlaneGeometry(12, 1.0),
-      pathMat,
-    );
+    const hillPath = new THREE.Mesh(new THREE.PlaneGeometry(12 * this.spread / 3.5, 1.0), pathMat);
     hillPath.rotation.x = -Math.PI / 2;
     hillPath.position.set(hill.x, 0.01, hill.z);
     hillPath.receiveShadow = true;
     this.group.add(hillPath);
 
-    // Cherry avenue path
     const cherry = this.zx(12, -12);
-    const cherryPath = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.0, 16),
-      pathMat,
-    );
+    const cherryPath = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 16 * this.spread / 3.5), pathMat);
     cherryPath.rotation.x = -Math.PI / 2;
     cherryPath.position.set(cherry.x, 0.01, cherry.z);
     cherryPath.receiveShadow = true;
     this.group.add(cherryPath);
   }
 
-  private _buildMainPlaza(_bounds: ParkBounds): void {
-    const c = this.zx(0, 0);
-
-    // Surrounding cherry trees
+  private _buildMainPlaza(bounds: ParkBounds): void {
     const positions = [
       { x: -6, z: -5 }, { x: -4, z: -7 }, { x: 0, z: -6 },
       { x: 3, z: -7 }, { x: 7, z: -5 }, { x: 9, z: -3 },
@@ -207,8 +200,7 @@ export class Park {
       this.group.add(tree.group);
     }
 
-    // Torii gates
-    const torii1 = new ToriiGate(new THREE.Vector3(0, 0, -_bounds.halfDepth + 4), 1.8);
+    const torii1 = new ToriiGate(new THREE.Vector3(0, 0, -bounds.halfDepth + 4 * this.spread / 3.5), 1.8);
     this.toriiGates.push(torii1);
     this.group.add(torii1.group);
 
@@ -217,7 +209,6 @@ export class Park {
     this.toriiGates.push(torii2);
     this.group.add(torii2.group);
 
-    // Stone lanterns
     const lanternPos = [{ x: -4, z: -4 }, { x: 5, z: -3 }, { x: -2, z: 4 }, { x: 7, z: 2 }, { x: -7, z: -2 }, { x: 3, z: -1 }];
     for (const p of lanternPos) {
       const pos = this.zx(p.x, p.z);
@@ -230,44 +221,39 @@ export class Park {
   private _buildPondGarden(_bounds: ParkBounds): void {
     const c = this.zx(-4, 10);
 
-    // Large pond
     const waterMat = new THREE.MeshStandardMaterial({
       color: '#4fc3f7', roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.7,
     });
-    const pond = new THREE.Mesh(new THREE.CircleGeometry(6, 24), waterMat);
+    const pond = new THREE.Mesh(new THREE.CircleGeometry(6 * this.spread / 3.5, 24), waterMat);
     pond.rotation.x = -Math.PI / 2;
     pond.position.set(c.x, 0.02, c.z);
     this.waterMeshes.push(pond);
     this.group.add(pond);
 
-    // Small adjacent pond
     const sp = this.zx(2, 13);
-    const smallPond = new THREE.Mesh(new THREE.CircleGeometry(2.5, 16), waterMat);
+    const smallPond = new THREE.Mesh(new THREE.CircleGeometry(2.5 * this.spread / 3.5, 16), waterMat);
     smallPond.rotation.x = -Math.PI / 2;
     smallPond.position.set(sp.x, 0.02, sp.z);
     this.waterMeshes.push(smallPond);
     this.group.add(smallPond);
 
-    // Lotus leaves
     const lotusMat = new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.8, metalness: 0, side: THREE.DoubleSide });
     for (let i = 0; i < 20; i++) {
       const leaf = new THREE.Mesh(new THREE.CircleGeometry(0.08 + Math.random() * 0.06, 6), lotusMat);
       const angle = Math.random() * Math.PI * 2;
-      const dist = 0.5 + Math.random() * 5;
+      const dist = (0.5 + Math.random() * 5) * this.spread / 3.5;
       leaf.position.set(c.x + Math.cos(angle) * dist, 0.03, c.z + Math.sin(angle) * dist);
       this.group.add(leaf);
     }
 
-    // Koi fish
     for (let i = 0; i < 6; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const dist = Math.random() * 3;
+      const dist = Math.random() * 3 * this.spread / 3.5;
       const koi = new KoiFish(new THREE.Vector3(c.x + Math.cos(angle) * dist, 0.05, c.z + Math.sin(angle) * dist), 0.6 + Math.random() * 0.8);
       this.koiFish.push(koi);
       this.group.add(koi.group);
     }
 
-    // Trees around pond
     const treePos = [{ x: -7, z: 8 }, { x: -1, z: 8 }, { x: -8, z: 12 }, { x: 0, z: 15 }, { x: -6, z: 14 }];
     for (const p of treePos) {
       const pos = this.zx(p.x, p.z);
@@ -276,7 +262,6 @@ export class Park {
       this.group.add(tree.group);
     }
 
-    // Stone lanterns near pond
     for (let i = 0; i < 3; i++) {
       const pos = this.zx(-6 + i * 4, 14);
       const lantern = new StoneLantern(new THREE.Vector3(pos.x, 0, pos.z), 0.7 + Math.random() * 0.2);
@@ -322,14 +307,13 @@ export class Park {
     const c = this.zx(-16, -12);
 
     for (let i = 0; i < 50; i++) {
-      const x = c.x + (Math.random() - 0.5) * 40;
-      const z = c.z + (Math.random() - 0.5) * 25;
+      const x = c.x + (Math.random() - 0.5) * 40 * this.spread / 3.5;
+      const z = c.z + (Math.random() - 0.5) * 25 * this.spread / 3.5;
       const bamboo = new Bamboo(new THREE.Vector3(x, 0, z), 1.2 + Math.random() * 2.0);
       this.bamboos.push(bamboo);
       this.group.add(bamboo.group);
     }
 
-    // Stone lanterns
     for (let i = 0; i < 4; i++) {
       const pos = this.zx(-16 + i * 3, -9 + i * 2);
       const lantern = new StoneLantern(new THREE.Vector3(pos.x, 0, pos.z), 0.9);
@@ -337,7 +321,6 @@ export class Park {
       this.group.add(lantern.group);
     }
 
-    // Trees at edge
     for (let i = 0; i < 5; i++) {
       const pos = this.zx(-8 + Math.random() * 4, -12 + Math.random() * 4);
       const tree = new Tree({ position: new THREE.Vector3(pos.x, 0, pos.z), scale: 0.8 + Math.random() * 0.4, canopySize: 0.8 + Math.random() * 0.5, trunkHeight: 0.7 + Math.random() * 0.4 });
@@ -378,7 +361,7 @@ export class Park {
     for (let i = -4; i <= 4; i++) {
       for (let side = -1; side <= 1; side += 2) {
         const tree = new Tree({
-          position: new THREE.Vector3(c.x + side * 3.5, 0, c.z + i * 3),
+          position: new THREE.Vector3(c.x + side * 3.5 * this.spread / 3.5, 0, c.z + i * 3 * this.spread / 3.5),
           scale: 0.9 + Math.random() * 0.4,
           canopySize: 1.0 + Math.random() * 0.4,
           trunkHeight: 0.8 + Math.random() * 0.4,
@@ -390,7 +373,7 @@ export class Park {
 
     for (let i = 0; i < 6; i++) {
       const tree = new Tree({
-        position: new THREE.Vector3(c.x + (Math.random() - 0.5) * 12, 0, c.z - 6 + Math.random() * 12),
+        position: new THREE.Vector3(c.x + (Math.random() - 0.5) * 12 * this.spread / 3.5, 0, c.z - 6 * this.spread / 3.5 + Math.random() * 12 * this.spread / 3.5),
         scale: 0.8 + Math.random() * 0.5,
         canopySize: 0.8 + Math.random() * 0.5,
         trunkHeight: 0.7 + Math.random() * 0.5,
@@ -408,10 +391,9 @@ export class Park {
   }
 
   private _placeScatteredTrees(bounds: ParkBounds): void {
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < Math.floor(60 * bounds.halfWidth / 120); i++) {
       const x = (Math.random() - 0.5) * bounds.halfWidth * 1.8;
       const z = (Math.random() - 0.5) * bounds.halfDepth * 1.8;
-      // Keep central paths clear
       if (Math.abs(x) < 3 && Math.abs(z) < 3) continue;
       const tree = new Tree({
         position: new THREE.Vector3(x, 0, z),
@@ -426,8 +408,9 @@ export class Park {
 
   private _placeFlowers(bounds: ParkBounds): void {
     const colors = ['#e91e63', '#f44336', '#ff5722', '#9c27b0', '#ff80ab', '#ffab40', '#e040fb'];
+    const count = Math.floor(200 * bounds.halfWidth / 120);
 
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < count; i++) {
       const color = colors[Math.floor(Math.random() * colors.length)];
       const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0, side: THREE.DoubleSide });
       const petalGeo = new THREE.CircleGeometry(0.03 + Math.random() * 0.025, 5);
@@ -445,8 +428,9 @@ export class Park {
 
   private _placeBushes(bounds: ParkBounds): void {
     const bushMat = new THREE.MeshStandardMaterial({ color: '#558b2f', roughness: 0.9, metalness: 0, flatShading: true });
+    const count = Math.floor(100 * bounds.halfWidth / 120);
 
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < count; i++) {
       const bushGeo = new THREE.SphereGeometry(0.15 + Math.random() * 0.2, 5, 4);
       const pos = bushGeo.attributes.position;
       for (let j = 0; j < pos.count; j++) pos.setY(j, pos.getY(j) * 0.5);
@@ -465,7 +449,8 @@ export class Park {
   }
 
   private _placeExtraLanterns(bounds: ParkBounds): void {
-    for (let i = 0; i < 10; i++) {
+    const count = Math.floor(10 * bounds.halfWidth / 120);
+    for (let i = 0; i < count; i++) {
       const x = (Math.random() - 0.5) * bounds.halfWidth * 1.4;
       const z = (Math.random() - 0.5) * bounds.halfDepth * 1.4;
       const lantern = new StoneLantern(new THREE.Vector3(x, 0, z), 0.6 + Math.random() * 0.4);
@@ -543,7 +528,7 @@ export class Park {
     for (const bell of this.bells) bell.dispose();
     for (const koi of this.koiFish) koi.dispose();
     for (const platform of this.viewingPlatforms) platform.dispose();
-    this.groundTexture.dispose();
+    if (this.groundTexture) this.groundTexture.dispose();
     this.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();

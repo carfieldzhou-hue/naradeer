@@ -15,10 +15,18 @@ import { Hud } from '../systems/Hud';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park, type MoneyTreeInfo } from '../environment/Park';
 
-const PARK_BOUNDS: ArenaBounds = {
+const BASE_BOUNDS: ArenaBounds = {
   halfWidth: 120,
   halfDepth: 90,
 };
+
+function getBoundsForLevel(level: number): ArenaBounds {
+  const scale = Math.pow(2, level - 1);
+  return {
+    halfWidth: Math.round(BASE_BOUNDS.halfWidth * scale),
+    halfDepth: Math.round(BASE_BOUNDS.halfDepth * scale),
+  };
+}
 
 const DEER_SPAWNS = [
   { x: -5, z: -3 }, { x: 12, z: -8 }, { x: -15, z: 10 }, { x: 20, z: 15 },
@@ -34,8 +42,8 @@ function generateObstacles(count: number): Array<{ x: number; z: number; rotatio
   for (let i = 0; i < count; i++) {
     let attempts = 0;
     while (attempts < 50) {
-      const x = (Math.random() - 0.5) * (PARK_BOUNDS.halfWidth * 1.6);
-      const z = (Math.random() - 0.5) * (PARK_BOUNDS.halfDepth * 1.6);
+      const x = (Math.random() - 0.5) * (BASE_BOUNDS.halfWidth * 1.6);
+      const z = (Math.random() - 0.5) * (BASE_BOUNDS.halfDepth * 1.6);
       let tooClose = false;
       for (const obs of obstacles) {
         const dx = obs.x - x;
@@ -64,8 +72,8 @@ function generateChestSpawns(count: number): Array<{ x: number; z: number }> {
   for (let i = 0; i < count; i++) {
     let attempts = 0;
     while (attempts < 50) {
-      const x = (Math.random() - 0.5) * (PARK_BOUNDS.halfWidth * 1.4);
-      const z = (Math.random() - 0.5) * (PARK_BOUNDS.halfDepth * 1.4);
+      const x = (Math.random() - 0.5) * (BASE_BOUNDS.halfWidth * 1.4);
+      const z = (Math.random() - 0.5) * (BASE_BOUNDS.halfDepth * 1.4);
       let tooClose = false;
       for (const c of chests) {
         const dx = c.x - x;
@@ -160,6 +168,7 @@ export class Game {
   private shareUsedThisLevel = false;
 
   private currentLevel = 1;
+  private currentBounds: ArenaBounds = BASE_BOUNDS;
   private levelConfig!: LevelConfig;
   private deerFed = 0;
   private levelComplete = false;
@@ -184,7 +193,8 @@ export class Game {
     });
 
     this.particles = new ParticleSystem(this.scene);
-    this.park = new Park(this.scene, PARK_BOUNDS);
+    this.currentBounds = getBoundsForLevel(this.currentLevel);
+    this.park = new Park(this.scene, this.currentBounds);
     this.scene.add(this.park.group);
 
     this.createScene();
@@ -232,6 +242,7 @@ export class Game {
 
   private startLevel(level: number): void {
     this.currentLevel = level;
+    this.currentBounds = getBoundsForLevel(level);
     this.levelConfig = getLevelConfig(level);
     this.deerFed = 0;
     this.crackerCount = this.levelConfig.initialCrackers;
@@ -250,11 +261,30 @@ export class Game {
     this.player.group.position.set(0, 0, 0);
     this.player.velocity.set(0, 0, 0);
 
+    // Regenerate park scenery with new bounds
+    this.park.regenerate(this.currentBounds);
+
+    // Update shadow camera for new bounds
+    const sun = this.scene.children.find(c => c instanceof THREE.DirectionalLight && c.castShadow) as THREE.DirectionalLight | undefined;
+    if (sun) {
+      const margin = 1.5;
+      sun.shadow.camera.left = -this.currentBounds.halfWidth * margin;
+      sun.shadow.camera.right = this.currentBounds.halfWidth * margin;
+      sun.shadow.camera.top = this.currentBounds.halfDepth * margin;
+      sun.shadow.camera.bottom = -this.currentBounds.halfDepth * margin;
+      sun.shadow.camera.updateProjectionMatrix();
+    }
+
+    // Update fog for new bounds
+    const far = Math.max(this.currentBounds.halfWidth, this.currentBounds.halfDepth) * 1.5;
+    this.scene.fog = new THREE.Fog('#c8e6c9', far * 0.3, far);
+
     for (const deer of this.deerList) deer.reset();
     this.journal.reset();
     this.createChests(this.levelConfig.moneyPool);
+    this.createVendorsForLevel(level);
     this.setupMoneyTrees();
-    this.hud.setShareAvailable(!this.shareUsedThisLevel);
+    this.hud.setShareAvailable(true);
 
     this.hud.setLevel(level, this.levelConfig.deerToFeed);
     this.hud.hideCompletion();
@@ -282,7 +312,7 @@ export class Game {
 
     if (this.feedCooldown > 0) this.feedCooldown -= delta;
 
-    this.player.update(delta, elapsed, this.input, this.tuning, PARK_BOUNDS, this.input.getCameraYaw());
+    this.player.update(delta, elapsed, this.input, this.tuning, this.currentBounds, this.input.getCameraYaw());
 
     for (const deer of this.deerList) {
       deer.update(delta, this.player.group.position, this.crackerCount > 0);
@@ -584,10 +614,36 @@ export class Game {
   }
 
   private createVendors(): void {
-    for (const spawn of VENDOR_SPAWNS) {
-      const vendor = new Vendor(spawn.x, spawn.z);
+    this.createVendorsForLevel(1);
+  }
+
+  private createVendorsForLevel(level: number): void {
+    // Remove old vendors
+    for (const v of this.vendors) {
+      this.scene.remove(v.group);
+    }
+    this.vendors.length = 0;
+
+    let count: number;
+    if (level <= 0) count = 0;
+    else if (level >= 5) count = 1;
+    else count = 5 - (level - 1); // level 1:5, 2:4, 3:3, 4:2
+
+    if (level >= 5) {
+      // Random position for single vendor
+      const x = (Math.random() - 0.5) * this.currentBounds.halfWidth * 0.6;
+      const z = (Math.random() - 0.5) * this.currentBounds.halfDepth * 0.6;
+      const vendor = new Vendor(x, z);
       this.vendors.push(vendor);
       this.scene.add(vendor.group);
+    } else {
+      // Pick random subset from fixed positions
+      const shuffled = [...VENDOR_SPAWNS].sort(() => Math.random() - 0.5);
+      for (let i = 0; i < count && i < shuffled.length; i++) {
+        const vendor = new Vendor(shuffled[i].x, shuffled[i].z);
+        this.vendors.push(vendor);
+        this.scene.add(vendor.group);
+      }
     }
   }
 
