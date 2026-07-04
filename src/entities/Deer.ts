@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { cloneDeerTemplate, getAnimationClips } from './DeerModel';
 
 // Deer state machine
 export enum DeerState {
@@ -100,20 +101,6 @@ const DEFAULT_TUNING: DeerTuning = {
   happyDuration: 3,
 };
 
-// Shared geometry/materials for performance
-const bodyColors = [
-  new THREE.Color('#c68642'),
-  new THREE.Color('#b87333'),
-  new THREE.Color('#a0522d'),
-  new THREE.Color('#d4a373'),
-  new THREE.Color('#8b5e3c'),
-  new THREE.Color('#cd853f'),
-  new THREE.Color('#deb887'),
-  new THREE.Color('#bc8f8f'),
-  new THREE.Color('#c4a882'),
-  new THREE.Color('#a0825a'),
-];
-
 function createFeedIndicatorTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
@@ -154,16 +141,10 @@ export class Deer {
   readonly index: number;
   readonly state = { current: DeerState.Wander, timer: 0 };
 
-  // Body parts for animation
-  private readonly head: THREE.Group;
-  private readonly neck: THREE.Group;
-  private readonly bodyMesh: THREE.Mesh;
-  private readonly legFL: THREE.Mesh;
-  private readonly legFR: THREE.Mesh;
-  private readonly legBL: THREE.Mesh;
-  private readonly legBR: THREE.Mesh;
-  private readonly tail: THREE.Mesh;
-  private readonly legHooves: THREE.Mesh[] = [];
+  // FBX model
+  private readonly modelRoot: THREE.Group;
+  private readonly mixer: THREE.AnimationMixer;
+  private readonly walkAction: THREE.AnimationAction | null = null;
 
   // AI state
   private readonly tuning: DeerTuning;
@@ -171,23 +152,16 @@ export class Deer {
   private readonly velocity = new THREE.Vector3();
   private readonly homePosition: THREE.Vector3;
   private eatingTimer = 0;
-  private bowAngle = 0;
   private happyTimer = 0;
   private happyBob = 0;
-  private legPhase = 0;
-
-  // Antlers
-  private readonly antlers: THREE.Group;
-  private readonly hasAntlers: boolean;
 
   // Feed indicator (3D world-space prompt)
   private readonly feedIndicator: THREE.Sprite;
 
-  private readonly legBaseX: [number, number, number, number];
-
   // Visual variety
   readonly scaleFactor: number;
   readonly isMale: boolean;
+  readonly hasAntlers: boolean;
 
   fed = false;
 
@@ -211,229 +185,23 @@ export class Deer {
     this.isMale = GENDER_BY_INDEX[index] === 1;
     this.hasAntlers = ANTLERS_BY_INDEX[index];
 
-    // ---- Visual variety ----
     this.scaleFactor = 0.82 + Math.random() * 0.36; // 0.82 ~ 1.18
+    // Clone FBX model and apply scale
+    this.modelRoot = cloneDeerTemplate(this.scaleFactor);
+    this.modelRoot.castShadow = true;
+    this.modelRoot.receiveShadow = true;
+    this.group.add(this.modelRoot);
 
-    const bodyWidth = 0.38 + Math.random() * 0.18;
-    const bodyHeight = 0.24 + Math.random() * 0.14;
-    const bodyDepth = 0.52 + Math.random() * 0.22;
-    const legHeight = 0.2 + Math.random() * 0.1;
-    const neckHeight = 0.16 + Math.random() * 0.08;
+    // ---- Visual differentiation ----
+    this.applyVisualStyle();
 
-    // Body color
-    const bodyColor = bodyColors[index % bodyColors.length];
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      roughness: 0.7,
-      metalness: 0,
-    });
-
-    // ---- Body ----
-    const bodyGeo = new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth);
-    // Round the body a bit
-    const bodyPos = bodyGeo.attributes.position;
-    for (let i = 0; i < bodyPos.count; i++) {
-      const x = bodyPos.getX(i);
-      const y = bodyPos.getY(i);
-      const z = bodyPos.getZ(i);
-      // Slight rounding based on height
-      const rounding = 1 - Math.abs(y) * (0.08 + Math.random() * 0.06);
-      bodyPos.setX(i, x * rounding);
-      bodyPos.setZ(i, z * rounding);
-    }
-    bodyPos.needsUpdate = true;
-    bodyGeo.computeVertexNormals();
-
-    this.bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    this.bodyMesh.position.y = bodyHeight * 1.5;
-    this.bodyMesh.castShadow = true;
-    this.bodyMesh.receiveShadow = true;
-    this.group.add(this.bodyMesh);
-
-    // ---- Neck ----
-    this.neck = new THREE.Group();
-    this.neck.position.set(0, bodyHeight * 1.5, -bodyDepth * 0.43);
-    this.group.add(this.neck);
-
-    const neckGeo = new THREE.CylinderGeometry(0.05, 0.07, neckHeight, 6);
-    const neckMesh = new THREE.Mesh(neckGeo, bodyMat);
-    neckMesh.position.y = neckHeight * 0.5;
-    neckMesh.rotation.x = 0.3;
-    neckMesh.castShadow = true;
-    this.neck.add(neckMesh);
-
-    // ---- Head ----
-    this.head = new THREE.Group();
-    this.head.position.set(0, neckHeight + 0.02, -0.04);
-    this.neck.add(this.head);
-
-    const headWidth = 0.09 + Math.random() * 0.04;
-    const headGeo = new THREE.BoxGeometry(headWidth, 0.07, 0.15);
-    const headMat = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      roughness: 0.7,
-      metalness: 0,
-    });
-    const headMesh = new THREE.Mesh(headGeo, headMat);
-    headMesh.position.set(0, 0, -0.07);
-    headMesh.castShadow = true;
-    this.head.add(headMesh);
-
-    // Snout (lighter)
-    const snoutMat = new THREE.MeshStandardMaterial({
-      color: '#e8d5b7',
-      roughness: 0.8,
-      metalness: 0,
-    });
-    const snoutGeo = new THREE.SphereGeometry(0.032, 6, 6);
-    const snout = new THREE.Mesh(snoutGeo, snoutMat);
-    snout.position.set(0, -0.01, -0.15);
-    snout.scale.set(1, 0.7, 1.3);
-    this.head.add(snout);
-
-    // Nose (black)
-    const noseMat = new THREE.MeshStandardMaterial({
-      color: '#1a1a1a',
-      roughness: 0.5,
-    });
-    const noseGeo = new THREE.SphereGeometry(0.018, 6, 6);
-    const nose = new THREE.Mesh(noseGeo, noseMat);
-    nose.position.set(0, 0.01, -0.18);
-    this.head.add(nose);
-
-    // Eyes
-    const eyeMat = new THREE.MeshStandardMaterial({
-      color: '#1a1a1a',
-      roughness: 0.2,
-    });
-    for (let side = -1; side <= 1; side += 2) {
-      const eyeGeo = new THREE.SphereGeometry(0.014, 6, 6);
-      const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(side * 0.042, 0.02, -0.09);
-      this.head.add(eye);
-
-      // Eye highlight
-      const highlightMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
-      const hlGeo = new THREE.SphereGeometry(0.004, 4, 4);
-      const hl = new THREE.Mesh(hlGeo, highlightMat);
-      hl.position.set(side * 0.045, 0.024, -0.08);
-      this.head.add(hl);
-    }
-
-    // Ears
-    const earMat = new THREE.MeshStandardMaterial({
-      color: bodyColor,
-      roughness: 0.7,
-    });
-    for (let side = -1; side <= 1; side += 2) {
-      const earGeo = new THREE.ConeGeometry(0.022, 0.045, 4);
-      const ear = new THREE.Mesh(earGeo, earMat);
-      ear.position.set(side * 0.05, 0.03, -0.02);
-      ear.rotation.z = side * 0.3;
-      ear.rotation.x = -0.2;
-      this.head.add(ear);
-    }
-
-    // ---- Antlers (males only) ----
-    this.antlers = new THREE.Group();
-    if (this.hasAntlers) {
-      const antlerMat = new THREE.MeshStandardMaterial({
-        color: '#6d4c41',
-        roughness: 0.9,
-        metalness: 0,
-      });
-      for (let side = -1; side <= 1; side += 2) {
-        this.buildAntler(side, antlerMat, index);
-      }
-    }
-    this.antlers.position.set(0, 0.03, -0.03);
-    this.head.add(this.antlers);
-
-    // ---- Legs ----
-    const darkerColor = bodyColor.clone().multiplyScalar(0.85);
-    const legMat = new THREE.MeshStandardMaterial({
-      color: darkerColor,
-      roughness: 0.8,
-      metalness: 0,
-    });
-    const legGeo = new THREE.CylinderGeometry(0.022, 0.028, legHeight, 5);
-
-    this.legFL = new THREE.Mesh(legGeo, legMat);
-    this.legFL.position.set(-bodyWidth * 0.27, legHeight * 0.5, -bodyDepth * 0.28);
-    this.legFL.castShadow = true;
-    this.group.add(this.legFL);
-
-    this.legFR = new THREE.Mesh(legGeo, legMat);
-    this.legFR.position.set(bodyWidth * 0.27, legHeight * 0.5, -bodyDepth * 0.28);
-    this.legFR.castShadow = true;
-    this.group.add(this.legFR);
-
-    this.legBL = new THREE.Mesh(legGeo, legMat);
-    this.legBL.position.set(-bodyWidth * 0.27, legHeight * 0.5, bodyDepth * 0.3);
-    this.legBL.castShadow = true;
-    this.group.add(this.legBL);
-
-    this.legBR = new THREE.Mesh(legGeo, legMat);
-    this.legBR.position.set(bodyWidth * 0.27, legHeight * 0.5, bodyDepth * 0.3);
-    this.legBR.castShadow = true;
-    this.group.add(this.legBR);
-
-    // Hooves (darker)
-    const hoofMat = new THREE.MeshStandardMaterial({
-      color: '#3e2723',
-      roughness: 0.9,
-    });
-    const hoofGeo = new THREE.CylinderGeometry(0.025, 0.03, 0.03, 5);
-    const legPositions = [
-      [-bodyWidth * 0.27, legHeight + 0.02, -bodyDepth * 0.28],
-      [bodyWidth * 0.27, legHeight + 0.02, -bodyDepth * 0.28],
-      [-bodyWidth * 0.27, legHeight + 0.02, bodyDepth * 0.3],
-      [bodyWidth * 0.27, legHeight + 0.02, bodyDepth * 0.3],
-    ] as const;
-    for (const pos of legPositions) {
-      const hoof = new THREE.Mesh(hoofGeo, hoofMat);
-      hoof.position.set(pos[0], pos[1], pos[2]);
-      this.legHooves.push(hoof);
-      this.group.add(hoof);
-    }
-
-    this.legBaseX = [
-      this.legFL.position.x,
-      this.legFR.position.x,
-      this.legBL.position.x,
-      this.legBR.position.x,
-    ];
-
-    // ---- Tail ----
-    const tailMat = new THREE.MeshStandardMaterial({
-      color: '#f5f5f5',
-      roughness: 0.9,
-    });
-    const tailGeo = new THREE.SphereGeometry(0.028, 5, 5);
-    this.tail = new THREE.Mesh(tailGeo, tailMat);
-    this.tail.position.set(0, bodyHeight * 1.6, bodyDepth * 0.5);
-    this.tail.scale.set(0.8, 0.6, 1);
-    this.group.add(this.tail);
-
-    // ---- White patches (sika deer spots) ----
-    if (index % 2 === 0) {
-      const spotMat = new THREE.MeshStandardMaterial({
-        color: '#f5f0e8',
-        roughness: 0.8,
-        transparent: true,
-        opacity: 0.25,
-      });
-      for (let i = 0; i < 3; i++) {
-        const spotGeo = new THREE.CircleGeometry(0.025 + Math.random() * 0.025, 5);
-        const spot = new THREE.Mesh(spotGeo, spotMat);
-        spot.position.set(
-          (Math.random() - 0.5) * bodyWidth * 0.7,
-          bodyHeight * 1.5 + (Math.random() - 0.5) * bodyHeight * 0.4,
-          (Math.random() - 0.5) * bodyDepth * 0.6,
-        );
-        spot.rotation.x = -Math.PI / 2;
-        this.group.add(spot);
-      }
+    // Animation mixer
+    this.mixer = new THREE.AnimationMixer(this.modelRoot);
+    const clips = getAnimationClips();
+    if (clips.length > 0) {
+      this.walkAction = this.mixer.clipAction(clips[0]);
+      this.walkAction.play();
+      this.walkAction.time = Math.random() * clips[0].duration;
     }
 
     // ---- Feed indicator (3D prompt) ----
@@ -450,9 +218,78 @@ export class Deer {
     this.feedIndicator.visible = false;
     this.group.add(this.feedIndicator);
 
+    this.group.position.copy(position);
+    this.group.rotation.y = Math.random() * Math.PI * 2;
+  }
+
+  private applyVisualStyle(): void {
+    // Color palette by personality
+    const PERSONALITY_COLORS: Record<string, { tint: string; emissive?: string; emissiveIntensity?: number }> = {
+      [DeerPersonality.Normal]:  { tint: '#ffffff' },  // No tint
+      [DeerPersonality.Shy]:     { tint: '#e8d4f0' },  // Light purple
+      [DeerPersonality.Friendly]:{ tint: '#d4e8f0' },  // Light blue
+      [DeerPersonality.Playful]: { tint: '#f0e8d4' },  // Warm cream
+      [DeerPersonality.Lazy]:    { tint: '#d4f0e8' },  // Mint green
+    };
+
+    // Rarity glow colors
+    const RARITY_GLOW: Record<string, { color: string; intensity: number }> = {
+      [DeerRarity.Common]:    { color: '#000000', intensity: 0 },
+      [DeerRarity.Uncommon]:  { color: '#4fc3f7', intensity: 0.08 },  // Light blue
+      [DeerRarity.Rare]:      { color: '#ba68c8', intensity: 0.12 },  // Purple
+      [DeerRarity.Legendary]: { color: '#ffd54f', intensity: 0.18 },  // Gold
+    };
+
+    const personalityStyle = PERSONALITY_COLORS[this.personality] ?? PERSONALITY_COLORS[DeerPersonality.Normal];
+    const rarityStyle = RARITY_GLOW[this.rarity] ?? RARITY_GLOW[DeerRarity.Common];
+
+    // Apply color tint and emissive to all meshes
+    this.modelRoot.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mat = child.material as THREE.MeshStandardMaterial;
+        mat.color = new THREE.Color(personalityStyle.tint);
+
+        // Add emissive glow for rarity
+        if (rarityStyle.intensity > 0) {
+          mat.emissive = new THREE.Color(rarityStyle.color);
+          mat.emissiveIntensity = rarityStyle.intensity;
+        }
+      }
+    });
+
+    // Add glow sprite for Uncommon+ rarity
+    if (this.rarity !== DeerRarity.Common && this.specialVariant !== 'golden') {
+      const glowCanvas = document.createElement('canvas');
+      glowCanvas.width = 128;
+      glowCanvas.height = 128;
+      const ctx = glowCanvas.getContext('2d')!;
+      const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      const glowColor = rarityStyle.color;
+      gradient.addColorStop(0, `${glowColor}59`);   // 35% opacity
+      gradient.addColorStop(0.3, `${glowColor}1f`); // 12% opacity
+      gradient.addColorStop(1, `${glowColor}00`);   // 0% opacity
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 128, 128);
+      const glowTex = new THREE.CanvasTexture(glowCanvas);
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+      );
+      const glowScale = this.rarity === DeerRarity.Legendary ? 2.2 : this.rarity === DeerRarity.Rare ? 1.8 : 1.4;
+      glow.scale.set(glowScale * this.scaleFactor, glowScale * this.scaleFactor, 1);
+      glow.position.y = 0.02;
+      this.goldenGlow = glow; // Reuse field for disposal
+      this.group.add(glow);
+    }
+
+    // Special variant overrides
     if (this.specialVariant === 'golden') {
-      bodyMat.emissive = new THREE.Color('#ffd700');
-      bodyMat.emissiveIntensity = 0.15;
+      this.modelRoot.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          const mat = child.material as THREE.MeshStandardMaterial;
+          mat.emissive = new THREE.Color('#ffd700');
+          mat.emissiveIntensity = 0.15;
+        }
+      });
       const gCanvas = document.createElement('canvas');
       gCanvas.width = 128;
       gCanvas.height = 128;
@@ -467,10 +304,11 @@ export class Deer {
       this.goldenGlow = new THREE.Sprite(
         new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
       );
-      this.goldenGlow.scale.set(2.5, 2.5, 1);
+      this.goldenGlow.scale.set(2.5 * this.scaleFactor, 2.5 * this.scaleFactor, 1);
       this.goldenGlow.position.y = 0.02;
       this.group.add(this.goldenGlow);
     }
+
     if (this.specialVariant === 'butterfly') {
       const wingShape = new THREE.Shape();
       wingShape.moveTo(0, 0);
@@ -481,80 +319,30 @@ export class Deer {
       const wMat2 = new THREE.MeshBasicMaterial({ color: 0x9b59b6, side: THREE.DoubleSide, transparent: true, opacity: 0.75 });
       const wg = new THREE.ShapeGeometry(wingShape);
       const w1 = new THREE.Mesh(wg, wMat1);
-      w1.position.set(-0.18, 0, 0);
+      w1.position.set(-0.18 * this.scaleFactor, 0, 0);
       const w2 = new THREE.Mesh(wg.clone(), wMat2);
-      w2.position.set(0.18, 0, 0);
+      w2.position.set(0.18 * this.scaleFactor, 0, 0);
       this.butterflyWingsGroup = new THREE.Group();
       this.butterflyWingsGroup.add(w1, w2);
-      this.butterflyWingsGroup.position.set(0, 0.55, -0.05);
+      this.butterflyWingsGroup.position.set(0, 0.55 * this.scaleFactor, -0.05 * this.scaleFactor);
       this.group.add(this.butterflyWingsGroup);
-    }
-
-    // Apply scale to the whole deer
-    this.group.scale.set(this.scaleFactor, this.scaleFactor, this.scaleFactor);
-
-    this.group.position.copy(position);
-    this.group.rotation.y = Math.random() * Math.PI * 2;
-  }
-
-  private buildAntler(side: number, mat: THREE.MeshStandardMaterial, seed: number): void {
-    const variant = seed % 3;
-    const spread = 0.04 + Math.random() * 0.03;
-
-    if (variant === 0) {
-      // Tall simple antler
-      const points: THREE.Vector3[] = [];
-      points.push(new THREE.Vector3(0, 0, 0));
-      points.push(new THREE.Vector3(side * spread, 0.05, 0));
-      points.push(new THREE.Vector3(side * spread * 1.3, 0.09, 0));
-      const curve = new THREE.CatmullRomCurve3(points);
-      const tubeGeo = new THREE.TubeGeometry(curve, 6, 0.006, 3, false);
-      const antler = new THREE.Mesh(tubeGeo, mat);
-      this.antlers.add(antler);
-
-      // Single side branch
-      const branchPoints: THREE.Vector3[] = [];
-      branchPoints.push(new THREE.Vector3(side * spread, 0.05, 0));
-      branchPoints.push(new THREE.Vector3(side * spread * 1.5, 0.055, 0));
-      branchPoints.push(new THREE.Vector3(side * spread * 1.2, 0.045, 0));
-      const branchCurve = new THREE.CatmullRomCurve3(branchPoints);
-      const branchGeo = new THREE.TubeGeometry(branchCurve, 4, 0.004, 3, false);
-      const branch = new THREE.Mesh(branchGeo, mat);
-      this.antlers.add(branch);
-    } else if (variant === 1) {
-      // Wide antler with fork
-      const points: THREE.Vector3[] = [];
-      points.push(new THREE.Vector3(0, 0, 0));
-      points.push(new THREE.Vector3(side * spread * 0.8, 0.04, 0));
-      points.push(new THREE.Vector3(side * spread * 1.5, 0.075, 0));
-      const curve = new THREE.CatmullRomCurve3(points);
-      const tubeGeo = new THREE.TubeGeometry(curve, 6, 0.005, 3, false);
-      const antler = new THREE.Mesh(tubeGeo, mat);
-      this.antlers.add(antler);
-
-      // Back branch
-      const bPoints: THREE.Vector3[] = [];
-      bPoints.push(new THREE.Vector3(side * spread * 0.6, 0.03, 0));
-      bPoints.push(new THREE.Vector3(side * spread * 0.3, 0.06, side * -0.02));
-      bPoints.push(new THREE.Vector3(side * spread * 0.1, 0.08, side * -0.03));
-      const bCurve = new THREE.CatmullRomCurve3(bPoints);
-      const bGeo = new THREE.TubeGeometry(bCurve, 4, 0.004, 3, false);
-      const branch = new THREE.Mesh(bGeo, mat);
-      this.antlers.add(branch);
-    } else {
-      // Short spike antler
-      const points: THREE.Vector3[] = [];
-      points.push(new THREE.Vector3(0, 0, 0));
-      points.push(new THREE.Vector3(side * spread * 0.5, 0.04, 0));
-      points.push(new THREE.Vector3(side * spread * 0.4, 0.065, 0));
-      const curve = new THREE.CatmullRomCurve3(points);
-      const tubeGeo = new THREE.TubeGeometry(curve, 5, 0.006, 3, false);
-      const antler = new THREE.Mesh(tubeGeo, mat);
-      this.antlers.add(antler);
     }
   }
 
   update(delta: number, playerPosition: THREE.Vector3): void {
+    // Advance animation mixer
+    this.mixer.update(delta);
+
+    // Control walk animation speed based on velocity
+    if (this.walkAction) {
+      const speed = this.velocity.length();
+      const moving = speed > 0.01 && (
+        this.state.current === DeerState.Wander ||
+        this.state.current === DeerState.Approach
+      );
+      this.walkAction.timeScale = moving ? Math.min(speed * 4, 2) : 0;
+    }
+
     const distToPlayer = this.group.position.distanceTo(playerPosition);
     this.playerVel.copy(playerPosition).sub(this.prevPlayerPos).divideScalar(Math.max(delta, 0.001));
     this.prevPlayerPos.copy(playerPosition);
@@ -582,17 +370,6 @@ export class Deer {
       default:
         this.updateWander(delta, playerPosition, distToPlayer);
     }
-
-    // Animation - leg movement
-    this.legPhase += delta * (this.velocity.length() * 5 + 1) * (this.personality === DeerPersonality.Playful ? 1.5 : 1);
-    const legSwing = Math.sin(this.legPhase) * 0.06;
-    this.legFL.position.x = this.legBaseX[0] + legSwing;
-    this.legFR.position.x = this.legBaseX[1] - legSwing;
-    this.legBL.position.x = this.legBaseX[2] - legSwing;
-    this.legBR.position.x = this.legBaseX[3] + legSwing;
-
-    // Tail wagging
-    this.tail.rotation.x = Math.sin(Date.now() * 0.003 + this.index) * 0.1;
 
     // Feed indicator: show floating "!" above deer ready to be fed
     const showIndicator = this.state.current === DeerState.Bow && !this.fed;
@@ -645,7 +422,7 @@ export class Deer {
 
     // Face movement direction
     if (this.velocity.lengthSq() > 0.01) {
-      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
+      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
       let diff = targetAngle - this.group.rotation.y;
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
@@ -662,9 +439,6 @@ export class Deer {
   private _updateIdle(delta: number, _playerPosition: THREE.Vector3, _distToPlayer: number): void {
     this.state.timer -= delta;
     this.velocity.lerp(new THREE.Vector3(), delta * 2);
-
-    // Head bob (grazing)
-    this.neck.rotation.x = Math.sin(Date.now() * 0.002) * 0.05;
 
     if (_distToPlayer < this.getDetectionRange() && !this.fed) {
       this.state.current = DeerState.Approach;
@@ -690,7 +464,7 @@ export class Deer {
         toPlayer.y = 0;
         toPlayer.normalize();
         this.velocity.lerp(toPlayer.multiplyScalar(this.tuning.approachSpeed * 1.3), delta * 3);
-        const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
+        const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
         let diff = targetAngle - this.group.rotation.y;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
@@ -740,7 +514,7 @@ export class Deer {
     this.velocity.lerp(toPlayer.multiplyScalar(speed), delta * 3);
 
     // Face player
-    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
+    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
     let diff = targetAngle - this.group.rotation.y;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
@@ -751,13 +525,8 @@ export class Deer {
     this.state.timer -= delta;
     this.velocity.lerp(new THREE.Vector3(), delta * 3);
 
-    // Head bow animation - lower head toward ground
-    this.bowAngle = Math.min(this.bowAngle + delta * 2, 0.8);
-    this.neck.rotation.x = this.bowAngle;
-
     if (this.state.timer <= 0) {
       this.state.current = DeerState.Idle;
-      this.bowAngle = 0;
     }
   }
 
@@ -765,13 +534,9 @@ export class Deer {
     this.eatingTimer -= delta;
     this.velocity.lerp(new THREE.Vector3(), delta * 3);
 
-    // Eating animation - head bobbing
-    this.neck.rotation.x = 0.5 + Math.sin(Date.now() * 0.01) * 0.15;
-
     if (this.eatingTimer <= 0) {
       this.state.current = DeerState.Happy;
       this.happyTimer = this.tuning.happyDuration;
-      this.neck.rotation.x = 0;
     }
   }
 
@@ -783,12 +548,6 @@ export class Deer {
     this.happyBob += delta * 6;
     this.group.position.y = Math.abs(Math.sin(this.happyBob)) * 0.12;
 
-    // Tail wag faster
-    this.tail.rotation.x = Math.sin(Date.now() * 0.01) * 0.3;
-
-    // Head nodding - visible nod up and down
-    this.neck.rotation.x = Math.sin(this.happyBob * 2.5) * 0.3;
-
     if (this.happyTimer <= 0) {
       if (this.personality === DeerPersonality.Friendly) {
         this.state.current = DeerState.Approach;
@@ -797,7 +556,6 @@ export class Deer {
         this.state.current = DeerState.Wander;
       }
       this.group.position.y = 0;
-      this.neck.rotation.x = 0;
     }
   }
 
@@ -806,7 +564,6 @@ export class Deer {
     this.state.current = DeerState.Eating;
     this.eatingTimer = this.tuning.eatDuration;
     this.fed = true;
-    this.bowAngle = 0;
   }
 
   canBeFed(): boolean {
@@ -868,14 +625,10 @@ export class Deer {
   }
 
   dispose(): void {
-    this.group.traverse((child) => {
+    this.mixer.stopAllAction();
+    this.modelRoot.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
-        }
       }
     });
     if (this.feedIndicator.material instanceof THREE.SpriteMaterial && this.feedIndicator.material.map) {

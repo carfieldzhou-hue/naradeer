@@ -1,5 +1,6 @@
 import './styles.css';
 import { Game } from './game/Game';
+import { loadDeerTemplate } from './entities/DeerModel';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#game-canvas');
 const startBtn = document.getElementById('start-button');
@@ -11,14 +12,24 @@ if (!canvasEl) {
 }
 
 let game: Game | null = null;
+let starting = false;
 
-function startGame(): void {
-  if (game) {
-    game.dispose();
+async function startGame(): Promise<void> {
+  if (starting) return;
+  starting = true;
+  startBtn!.textContent = '加载中…';
+  try {
+    await loadDeerTemplate();
+    if (game) game.dispose();
+    game = new Game(canvasEl!);
+    game.start();
+    titleOverlay?.classList.add('hidden');
+  } catch (err) {
+    console.error('Failed to start:', err);
+    startBtn!.textContent = '重试';
+  } finally {
+    starting = false;
   }
-  game = new Game(canvasEl!);
-  game.start();
-  titleOverlay?.classList.add('hidden');
 }
 
 startBtn?.addEventListener('click', startGame);

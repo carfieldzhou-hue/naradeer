@@ -39,7 +39,6 @@ export class Journal {
   private readonly grid: HTMLElement;
   private readonly countEl: HTMLElement;
   private readonly totalEl: HTMLElement;
-  private readonly hintEl: HTMLElement;
   private isOpen = false;
 
   constructor(entries: DeerEntry[]) {
@@ -49,7 +48,6 @@ export class Journal {
     this.grid = this.getElement('#journal-grid');
     this.countEl = this.getElement('#journal-count');
     this.totalEl = this.getElement('#journal-total');
-    this.hintEl = this.getElement('#journal-hint');
 
     // Close button
     const closeBtn = document.getElementById('journal-close');
