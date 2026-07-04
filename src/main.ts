@@ -1,6 +1,7 @@
 import './styles.css';
 import { Game } from './game/Game';
 import { loadDeerTemplate } from './entities/DeerModel';
+import { loadVendorTemplate } from './entities/VendorModel';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#game-canvas');
 const startBtn = document.getElementById('start-button');
@@ -19,7 +20,7 @@ async function startGame(): Promise<void> {
   starting = true;
   startBtn!.textContent = '加载中…';
   try {
-    await loadDeerTemplate();
+    await Promise.all([loadDeerTemplate(), loadVendorTemplate()]);
     if (game) game.dispose();
     game = new Game(canvasEl!);
     game.start();

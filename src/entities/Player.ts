@@ -218,10 +218,20 @@ export class Player {
     this.group.add(this.bodyGroup);
   }
 
-  update(delta: number, _elapsed: number, input: InputController, tuning: PlayerTuning, bounds: ArenaBounds): void {
+  update(delta: number, _elapsed: number, input: InputController, tuning: PlayerTuning, bounds: ArenaBounds, cameraYaw: number): void {
     input.readMovement(this.move);
     const dash = input.isDashHeld() ? tuning.dashMultiplier : 1;
-    this.targetVelocity.set(this.move.x, 0, this.move.y).multiplyScalar(tuning.speed * dash);
+
+    // Rotate movement input relative to camera yaw
+    // forward = (-sinθ, -cosθ), right = (cosθ, -sinθ)
+    const sinYaw = Math.sin(cameraYaw);
+    const cosYaw = Math.cos(cameraYaw);
+    const worldX = this.move.x * cosYaw + this.move.y * sinYaw;
+    const worldZ = -this.move.x * sinYaw + this.move.y * cosYaw;
+    this.targetVelocity.set(worldX, 0, worldZ).multiplyScalar(tuning.speed * dash);
+
+    // Rotate player body to face camera direction
+    this.bodyGroup.rotation.y = cameraYaw;
 
     const smoothing = 1 - Math.exp(-tuning.acceleration * delta);
     this.velocity.lerp(this.targetVelocity, smoothing);
@@ -251,15 +261,6 @@ export class Player {
     const halfD = bounds.halfDepth;
     this.group.position.x = THREE.MathUtils.clamp(this.group.position.x, -halfW + 0.8, halfW - 0.8);
     this.group.position.z = THREE.MathUtils.clamp(this.group.position.z, -halfD + 0.8, halfD - 0.8);
-
-    // Face movement direction
-    if (this.velocity.lengthSq() > 0.001) {
-      const targetAngle = Math.atan2(this.velocity.x, this.velocity.z) + Math.PI;
-      let diff = targetAngle - this.group.rotation.y;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      this.group.rotation.y += diff * delta * 8;
-    }
 
     // Walk animation
     const moving = this.velocity.length() > 0.1;

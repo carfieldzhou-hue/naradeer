@@ -200,6 +200,26 @@ export class AudioSystem {
     osc2.stop(now + 3);
   }
 
+  error(): void {
+    if (!this.context || this.context.state !== 'running') return;
+    const now = this.context.currentTime;
+
+    // Short buzzer for error
+    const osc = this.context.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.linearRampToValueAtTime(100, now + 0.15);
+
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+
+    osc.connect(gain);
+    if (this.masterGain) gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+  }
+
   dispose(): void {
     void this.context?.close();
     this.context = null;

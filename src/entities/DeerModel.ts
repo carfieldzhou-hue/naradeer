@@ -7,8 +7,6 @@ import texBaseUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_qua
 import texRoughnessUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_roughness.png?url';
 import texMetallicUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_metallic.png?url';
 
-const TARGET_HEIGHT = 0.65;
-
 let template: THREE.Group | null = null;
 let templateClips: THREE.AnimationClip[] = [];
 

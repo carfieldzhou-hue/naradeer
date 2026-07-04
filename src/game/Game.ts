@@ -3,8 +3,10 @@ import { InputController } from '../core/InputController';
 import { Loop } from '../core/Loop';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
 import { Player, type ArenaBounds } from '../entities/Player';
-import { Deer, DeerState } from '../entities/Deer';
+import { Deer } from '../entities/Deer';
 import { Obstacle } from '../entities/Obstacle';
+import { Vendor } from '../entities/Vendor';
+import { TreasureChest } from '../entities/TreasureChest';
 import { AudioSystem } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
 import { DebugTools, type DebugTuning } from '../systems/DebugTools';
@@ -14,53 +16,116 @@ import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park } from '../environment/Park';
 
 const PARK_BOUNDS: ArenaBounds = {
-  halfWidth: 24,
-  halfDepth: 18,
+  halfWidth: 120,
+  halfDepth: 90,
 };
 
-// Deer spawn positions (expanded for larger map)
+// Deer spawn positions - scattered across larger map
 const DEER_SPAWNS = [
-  // Main plaza area
+  // Central area
   { x: -5, z: -3 },
-  { x: 4, z: -5 },
-  { x: -3, z: 4 },
-  { x: 6, z: 2 },
-  { x: -7, z: 1 },
-  { x: 2, z: -2 },
-  { x: -4, z: -6 },
-  { x: 0, z: 5 },
-  // Pond garden area
-  { x: -8, z: 9 },
-  { x: 0, z: 12 },
-  // Shrine corner
-  { x: 14, z: 8 },
-  { x: 18, z: 4 },
-  // Bamboo grove
-  { x: -10, z: -10 },
-  // Hill viewpoint
-  { x: -16, z: 0 },
-  // Cherry avenue
-  { x: 10, z: -8 },
-  { x: 12, z: -14 },
+  { x: 12, z: -8 },
+  { x: -15, z: 10 },
+  { x: 20, z: 15 },
+  // North
+  { x: -30, z: -25 },
+  { x: 10, z: -35 },
+  { x: -45, z: -10 },
+  // East
+  { x: 40, z: 5 },
+  { x: 55, z: -20 },
+  { x: 65, z: 30 },
+  // South
+  { x: -20, z: 40 },
+  { x: 30, z: 50 },
+  { x: -50, z: 55 },
+  // West
+  { x: -70, z: -5 },
+  { x: -80, z: 30 },
+  // Far corners
+  { x: -90, z: -60 },
 ];
 
-// Obstacle definitions - low fences/barriers on paths
-const OBSTACLES = [
-  // Main north-south path
-  { x: -0.5, z: -10, rotation: 0 },
-  { x: 0.5, z: 10, rotation: 0 },
-  // East-west path
-  { x: 8, z: 0.5, rotation: Math.PI / 2 },
-  { x: -8, z: -0.5, rotation: Math.PI / 2 },
-  // Path to shrine
-  { x: 12, z: 4.5, rotation: 0, width: 1.0 },
-  // Cherry avenue
-  { x: 12, z: -9, rotation: 0, width: 0.8 },
-  // Bamboo grove entrance
-  { x: -12, z: -5, rotation: Math.PI / 3, width: 0.8 },
-  // Hill viewpoint path
-  { x: -15, z: 1.5, rotation: 0, width: 0.8 },
+// Generate random obstacles
+function generateObstacles(count: number): Array<{ x: number; z: number; rotation: number; width?: number }> {
+  const obstacles: Array<{ x: number; z: number; rotation: number; width?: number }> = [];
+  const minDist = 8; // Minimum distance between obstacles
+
+  for (let i = 0; i < count; i++) {
+    let attempts = 0;
+    while (attempts < 50) {
+      const x = (Math.random() - 0.5) * (PARK_BOUNDS.halfWidth * 1.6);
+      const z = (Math.random() - 0.5) * (PARK_BOUNDS.halfDepth * 1.6);
+
+      // Check distance from other obstacles
+      let tooClose = false;
+      for (const obs of obstacles) {
+        const dx = obs.x - x;
+        const dz = obs.z - z;
+        if (Math.sqrt(dx * dx + dz * dz) < minDist) {
+          tooClose = true;
+          break;
+        }
+      }
+
+      if (!tooClose) {
+        obstacles.push({
+          x,
+          z,
+          rotation: Math.random() * Math.PI,
+          width: 0.6 + Math.random() * 0.8,
+        });
+        break;
+      }
+      attempts++;
+    }
+  }
+  return obstacles;
+}
+
+const OBSTACLES = generateObstacles(40);
+
+// Vendor positions - scattered near paths
+const VENDOR_SPAWNS = [
+  { x: 10, z: 0 },
+  { x: -30, z: -20 },
+  { x: 50, z: 25 },
+  { x: -60, z: 40 },
+  { x: 30, z: -45 },
 ];
+
+// Generate random treasure chests
+function generateChests(count: number): Array<{ x: number; z: number }> {
+  const chests: Array<{ x: number; z: number }> = [];
+  const minDist = 12;
+
+  for (let i = 0; i < count; i++) {
+    let attempts = 0;
+    while (attempts < 50) {
+      const x = (Math.random() - 0.5) * (PARK_BOUNDS.halfWidth * 1.4);
+      const z = (Math.random() - 0.5) * (PARK_BOUNDS.halfDepth * 1.4);
+
+      let tooClose = false;
+      for (const c of chests) {
+        const dx = c.x - x;
+        const dz = c.z - z;
+        if (Math.sqrt(dx * dx + dz * dz) < minDist) {
+          tooClose = true;
+          break;
+        }
+      }
+
+      if (!tooClose) {
+        chests.push({ x, z });
+        break;
+      }
+      attempts++;
+    }
+  }
+  return chests;
+}
+
+const CHEST_SPAWNS = generateChests(25);
 
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
@@ -96,10 +161,15 @@ export class Game {
   private complete = false;
   private readonly journal: Journal;
   private readonly obstacles: Obstacle[] = [];
+  private readonly vendors: Vendor[] = [];
+  private readonly chests: TreasureChest[] = [];
+  private crackerCount = 3; // Start with 3 free crackers
+  private money = 0;
   private obstacleNearby = false;
   private feedCooldown = 0;
   private readonly feedKeyPressed = new Set<string>();
   private nearestDeer: Deer | null = null;
+  private nearestVendor: Vendor | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = createRenderer(canvas);
@@ -127,6 +197,8 @@ export class Game {
     this.createDeer();
     this.totalDeer = this.deerList.length;
     this.createObstacles();
+    this.createVendors();
+    this.createChests();
 
     // Journal - collect deer info for the encyclopedia
     this.journal = new Journal(
@@ -134,7 +206,7 @@ export class Game {
     );
 
     this.hud.setTarget(this.totalDeer);
-    this.cameraRig.snapTo(this.player.group.position);
+    this.cameraRig.snapTo(this.player.group.position, this.input.getCameraYaw(), this.input.getCameraPitch());
     resizeRenderer(this.renderer, this.camera, this.tuning.maxDpr);
     this.publishDiagnostics();
 
@@ -201,11 +273,11 @@ export class Game {
     if (this.feedCooldown > 0) this.feedCooldown -= delta;
 
     // Update player
-    this.player.update(delta, elapsed, this.input, this.tuning, PARK_BOUNDS);
+    this.player.update(delta, elapsed, this.input, this.tuning, PARK_BOUNDS, this.input.getCameraYaw());
 
     // Update deer
     for (const deer of this.deerList) {
-      deer.update(delta, this.player.group.position);
+      deer.update(delta, this.player.group.position, this.crackerCount > 0);
     }
 
     // Obstacle collision
@@ -241,9 +313,9 @@ export class Game {
 
     // Find nearest feedable deer
     this.nearestDeer = null;
-    let nearestDist = 2.5; // Max feed range
+    let nearestDist = 2.5;
     for (const deer of this.deerList) {
-      if (!deer.canBeFed() && deer.state.current !== DeerState.Bow) continue;
+      if (!deer.canBeFed()) continue;
       const dist = deer.group.position.distanceTo(this.player.group.position);
       if (dist < nearestDist) {
         nearestDist = dist;
@@ -251,11 +323,44 @@ export class Game {
       }
     }
 
+    // Check vendor proximity
+    this.nearestVendor = null;
+    for (const vendor of this.vendors) {
+      if (vendor.isPlayerNear(this.player.group.position)) {
+        this.nearestVendor = vendor;
+        break;
+      }
+    }
+
+    // Check chest collection
+    for (const chest of this.chests) {
+      chest.update(delta);
+      if (chest.isPlayerNear(this.player.group.position)) {
+        const money = chest.collect();
+        if (money > 0) {
+          this.money += money;
+          this.audio.feed(); // Reuse feed sound for pickup
+          this.particles.emitPickup(chest.group.position.clone());
+        }
+      }
+    }
+
     // Update systems
-    this.cameraRig.update(delta, this.player.group.position, this.tuning.cameraLag);
+    this.cameraRig.update(delta, this.player.group.position, this.tuning.cameraLag, this.input.getCameraYaw(), this.input.getCameraPitch());
     this.particles.update(delta);
     this.park.update(delta);
-    this.hud.update(this.score, this.totalDeer, this.elapsed, this.complete, this.nearestDeer !== null, this.journal.getCollectedCount(), this.obstacleNearby && this.player.isOnGround());
+    this.hud.update(
+      this.score,
+      this.totalDeer,
+      this.elapsed,
+      this.complete,
+      this.nearestDeer !== null && this.crackerCount > 0,
+      this.journal.getCollectedCount(),
+      this.obstacleNearby && this.player.isOnGround(),
+      this.crackerCount,
+      this.money,
+      this.nearestVendor !== null,
+    );
 
     // Check win
     if (this.score >= this.totalDeer && !this.complete) {
@@ -269,8 +374,32 @@ export class Game {
 
   private tryFeed(): void {
     if (this.feedCooldown > 0 || this.complete) return;
+
+    // Try to buy from vendor first
+    if (this.nearestVendor) {
+      if (this.money >= 100) {
+        this.money -= 100;
+        this.crackerCount++;
+        this.audio.feed();
+        this.hud.showToast('购买成功！仙贝 +1');
+        this.feedCooldown = 0.3;
+      } else {
+        this.audio.error();
+        this.hud.showToast('金钱不足！需要100円');
+        this.feedCooldown = 0.5;
+      }
+      return;
+    }
+
+    // Try to feed deer
     if (this.nearestDeer && this.nearestDeer.canBeFed()) {
-      this.doFeed(this.nearestDeer);
+      if (this.crackerCount > 0) {
+        this.doFeed(this.nearestDeer);
+      } else {
+        this.audio.error();
+        this.hud.showToast('没有仙贝了！先去小摊购买');
+        this.feedCooldown = 0.5;
+      }
     }
   }
 
@@ -286,8 +415,10 @@ export class Game {
   private doFeed(deer: Deer): void {
     deer.startEating();
     this.score += 1;
+    this.crackerCount--;
     this.feedCooldown = 0.3;
     this.audio.feed();
+    this.hud.showToast('喂食成功！🦌');
     this.journal.markCollected(deer.index);
 
     // Particle effects
@@ -312,7 +443,7 @@ export class Game {
   private createScene(): void {
     // Sky - warm Japanese sunset gradient
     this.scene.background = new THREE.Color('#87ceeb');
-    this.scene.fog = new THREE.Fog('#c8e6c9', 30, 65);
+    this.scene.fog = new THREE.Fog('#c8e6c9', 80, 180);
 
     // ---- Lighting ----
     const hemisphere = new THREE.HemisphereLight('#b3d9ff', '#8d6e63', 1.2);
@@ -324,11 +455,11 @@ export class Game {
     sun.castShadow = true;
     sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 40;
-    sun.shadow.camera.left = -28;
-    sun.shadow.camera.right = 28;
-    sun.shadow.camera.top = 22;
-    sun.shadow.camera.bottom = -22;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -150;
+    sun.shadow.camera.right = 150;
+    sun.shadow.camera.top = 120;
+    sun.shadow.camera.bottom = -120;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
 
@@ -364,6 +495,22 @@ export class Game {
       );
       this.deerList.push(deer);
       this.scene.add(deer.group);
+    }
+  }
+
+  private createVendors(): void {
+    for (const spawn of VENDOR_SPAWNS) {
+      const vendor = new Vendor(spawn.x, spawn.z);
+      this.vendors.push(vendor);
+      this.scene.add(vendor.group);
+    }
+  }
+
+  private createChests(): void {
+    for (const spawn of CHEST_SPAWNS) {
+      const chest = new TreasureChest(spawn.x, spawn.z);
+      this.chests.push(chest);
+      this.scene.add(chest.group);
     }
   }
 

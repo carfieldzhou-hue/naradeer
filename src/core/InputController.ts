@@ -22,10 +22,14 @@ export class InputController {
 
   private dashDown = false;
   private jumpPressed = false;
+  private cameraYaw = 0;
+  private mouseButton = -1;
+  private cameraPitch = 0.4;
 
   private readonly onKeyDown = (event: KeyboardEvent) => {
     this.keys.add(event.code);
     if (event.code === 'Space') {
+      event.preventDefault();
       this.jumpPressed = true;
     }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
@@ -35,6 +39,9 @@ export class InputController {
 
   private readonly onKeyUp = (event: KeyboardEvent) => {
     this.keys.delete(event.code);
+    if (event.code === 'Space') {
+      event.preventDefault();
+    }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
       this.dashDown = false;
     }
@@ -81,6 +88,21 @@ export class InputController {
     this.dashDown = false;
   };
 
+  private readonly onMouseDown = (event: MouseEvent) => {
+    this.mouseButton = event.button;
+  };
+
+  private readonly onMouseMove = (event: MouseEvent) => {
+    if (this.mouseButton >= 0) {
+      this.cameraYaw -= event.movementX * 0.005;
+      this.cameraPitch = Math.max(0.1, Math.min(1.2, this.cameraPitch + event.movementY * 0.005));
+    }
+  };
+
+  private readonly onMouseUp = (_event: MouseEvent) => {
+    this.mouseButton = -1;
+  };
+
   constructor(
     private readonly stick: HTMLElement,
     private readonly knob: HTMLElement,
@@ -88,6 +110,9 @@ export class InputController {
   ) {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('mousedown', this.onMouseDown);
+    window.addEventListener('mousemove', this.onMouseMove);
+    window.addEventListener('mouseup', this.onMouseUp);
     this.stick.addEventListener('pointerdown', this.onStickDown);
     this.stick.addEventListener('pointermove', this.onStickMove);
     this.stick.addEventListener('pointerup', this.onStickUp);
@@ -96,6 +121,14 @@ export class InputController {
     this.dashButton.addEventListener('pointerup', this.onDashUp);
     this.dashButton.addEventListener('pointercancel', this.onDashUp);
     this.dashButton.addEventListener('pointerleave', this.onDashUp);
+  }
+
+  getCameraYaw(): number {
+    return this.cameraYaw;
+  }
+
+  getCameraPitch(): number {
+    return this.cameraPitch;
   }
 
   readMovement(target: THREE.Vector2): THREE.Vector2 {
@@ -125,6 +158,9 @@ export class InputController {
   dispose(): void {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('mousedown', this.onMouseDown);
+    window.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('mouseup', this.onMouseUp);
     this.stick.removeEventListener('pointerdown', this.onStickDown);
     this.stick.removeEventListener('pointermove', this.onStickMove);
     this.stick.removeEventListener('pointerup', this.onStickUp);

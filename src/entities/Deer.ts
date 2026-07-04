@@ -10,6 +10,7 @@ export enum DeerState {
   Eating = 'eating',
   Happy = 'happy',
   Flee = 'flee',
+  Angry = 'angry',
 }
 
 export enum DeerPersonality {
@@ -92,8 +93,8 @@ export interface DeerTuning {
 }
 
 const DEFAULT_TUNING: DeerTuning = {
-  wanderRadius: 8,
-  wanderSpeed: 0.8,
+  wanderRadius: 30,      // Larger wander area for bigger map
+  wanderSpeed: 0.6,      // Slightly slower for natural movement
   approachSpeed: 1.5,
   detectionRange: 5,
   bowDuration: 2,
@@ -145,6 +146,7 @@ export class Deer {
   private readonly modelRoot: THREE.Group;
   private readonly mixer: THREE.AnimationMixer;
   private readonly walkAction: THREE.AnimationAction | null = null;
+  private readonly headBone: THREE.Bone | null = null;
 
   // AI state
   private readonly tuning: DeerTuning;
@@ -154,6 +156,7 @@ export class Deer {
   private eatingTimer = 0;
   private happyTimer = 0;
   private happyBob = 0;
+  private angryTimer = 0;
 
   // Feed indicator (3D world-space prompt)
   private readonly feedIndicator: THREE.Sprite;
@@ -204,6 +207,14 @@ export class Deer {
       this.walkAction.time = Math.random() * clips[0].duration;
     }
 
+    // Find head bone for head-tracking
+    const foundBone = this.findHeadBone();
+    this.headBone = foundBone;
+    if (foundBone) {
+      const r = foundBone.rotation;
+      console.log(`[Deer ${index}] head bone: "${foundBone.name}" rot=(${r.x.toFixed(2)}, ${r.y.toFixed(2)}, ${r.z.toFixed(2)})`);
+    }
+
     // ---- Feed indicator (3D prompt) ----
     this.feedIndicator = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -220,6 +231,30 @@ export class Deer {
 
     this.group.position.copy(position);
     this.group.rotation.y = Math.random() * Math.PI * 2;
+  }
+
+  private findHeadBone(): THREE.Bone | null {
+    // Search by name first
+    const bones: THREE.Bone[] = [];
+    this.modelRoot.traverse((child) => {
+      if (child instanceof THREE.Bone) bones.push(child);
+    });
+    for (const b of bones) {
+      const name = b.name.toLowerCase();
+      if (name.includes('head') || name.includes('neck')) return b;
+    }
+    // Fallback: highest bone
+    let highest: THREE.Bone | null = null;
+    let highestY = -Infinity;
+    for (const b of bones) {
+      const worldPos = new THREE.Vector3();
+      b.getWorldPosition(worldPos);
+      if (worldPos.y > highestY) {
+        highestY = worldPos.y;
+        highest = b;
+      }
+    }
+    return highest;
   }
 
   private applyVisualStyle(): void {
@@ -329,23 +364,31 @@ export class Deer {
     }
   }
 
-  update(delta: number, playerPosition: THREE.Vector3): void {
+  update(delta: number, playerPosition: THREE.Vector3, playerHasCrackers: boolean): void {
     // Advance animation mixer
     this.mixer.update(delta);
 
     // Control walk animation speed based on velocity
     if (this.walkAction) {
       const speed = this.velocity.length();
-      const moving = speed > 0.01 && (
-        this.state.current === DeerState.Wander ||
-        this.state.current === DeerState.Approach
-      );
-      this.walkAction.timeScale = moving ? Math.min(speed * 4, 2) : 0;
+      const targetScale = speed > 0.01 ? 1.2 : 0;
+      this.walkAction.timeScale += (targetScale - this.walkAction.timeScale) * Math.min(delta * 5, 1);
     }
 
     const distToPlayer = this.group.position.distanceTo(playerPosition);
     this.playerVel.copy(playerPosition).sub(this.prevPlayerPos).divideScalar(Math.max(delta, 0.001));
     this.prevPlayerPos.copy(playerPosition);
+
+    // Check if player is near and has no crackers -> become angry
+    if (distToPlayer < 1.5 && !playerHasCrackers && this.state.current !== DeerState.Eating && this.state.current !== DeerState.Happy && this.state.current !== DeerState.Angry) {
+      this.state.current = DeerState.Angry;
+      this.angryTimer = 1.5;
+      // Push player away
+      const pushDir = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
+      pushDir.y = 0;
+      pushDir.normalize().multiplyScalar(-3); // Push away
+      this.velocity.copy(pushDir);
+    }
 
     // State machine
     switch (this.state.current) {
@@ -367,8 +410,46 @@ export class Deer {
       case DeerState.Happy:
         this.updateHappy(delta);
         break;
+      case DeerState.Angry:
+        this.updateAngry(delta);
+        break;
       default:
         this.updateWander(delta, playerPosition, distToPlayer);
+    }
+
+    // Head tracking: look toward player when nearby, nod when happy
+    if (this.headBone) {
+      if (this.state.current === DeerState.Happy) {
+        // Nod animation after feeding (forward nod, not backward)
+        const nodSpeed = 8;
+        const nodAmount = 0.25;
+        this.happyBob += delta * nodSpeed;
+        this.headBone.rotation.z = -Math.abs(Math.sin(this.happyBob)) * nodAmount;
+        this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 3;
+      } else if (distToPlayer < this.getDetectionRange() * 1.5) {
+        const headWorld = new THREE.Vector3();
+        this.headBone.getWorldPosition(headWorld);
+        const toPlayer = new THREE.Vector3().copy(playerPosition).sub(headWorld);
+        toPlayer.y = 0;
+        if (toPlayer.lengthSq() > 0.01) {
+          const targetAngle = Math.atan2(toPlayer.x, toPlayer.z);
+          if (this.headBone.parent) {
+            const parentWorld = new THREE.Vector3();
+            this.headBone.parent.getWorldPosition(parentWorld);
+            const parentDir = new THREE.Vector3().copy(headWorld).sub(parentWorld);
+            const parentAngle = Math.atan2(parentDir.x, parentDir.z);
+            let localAngle = targetAngle - parentAngle;
+            localAngle = Math.max(-0.8, Math.min(0.8, localAngle));
+            this.headBone.rotation.y += (localAngle - this.headBone.rotation.y) * delta * 4;
+            this.headBone.rotation.x += (0 - this.headBone.rotation.x) * delta * 3;
+            this.headBone.rotation.z += (0 - this.headBone.rotation.z) * delta * 3;
+          }
+        }
+      } else {
+        this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 2;
+        this.headBone.rotation.x += (0 - this.headBone.rotation.x) * delta * 2;
+        this.headBone.rotation.z += (0 - this.headBone.rotation.z) * delta * 2;
+      }
     }
 
     // Feed indicator: show floating "!" above deer ready to be fed
@@ -408,7 +489,7 @@ export class Deer {
       );
     }
 
-    // Check if player is close enough to approach
+    // Approach player when nearby and unfed
     if (distToPlayer < this.getDetectionRange() && !this.fed) {
       this.state.current = DeerState.Approach;
       return;
@@ -427,12 +508,6 @@ export class Deer {
       while (diff > Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
       this.group.rotation.y += diff * delta * 4;
-    }
-
-    // Idle grazing occasionally
-    if (Math.random() < 0.002) {
-      this.state.current = DeerState.Idle;
-      this.state.timer = 1 + Math.random() * 2;
     }
   }
 
@@ -559,6 +634,26 @@ export class Deer {
     }
   }
 
+  private updateAngry(delta: number): void {
+    this.angryTimer -= delta;
+    // Deer stamps and makes noise
+    this.happyBob += delta * 12;
+    this.group.position.y = Math.abs(Math.sin(this.happyBob)) * 0.08;
+
+    // Face player while angry
+    const targetAngle = Math.atan2(this.velocity.x, this.velocity.z);
+    let diff = targetAngle - this.group.rotation.y;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    this.group.rotation.y += diff * delta * 8;
+
+    if (this.angryTimer <= 0) {
+      this.state.current = DeerState.Wander;
+      this.group.position.y = 0;
+      this.velocity.set(0, 0, 0);
+    }
+  }
+
   // Call when player feeds the deer
   startEating(): void {
     this.state.current = DeerState.Eating;
@@ -567,7 +662,7 @@ export class Deer {
   }
 
   canBeFed(): boolean {
-    return this.state.current === DeerState.Bow && !this.fed;
+    return !this.fed;
   }
 
   isHappy(): boolean {

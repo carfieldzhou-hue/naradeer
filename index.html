@@ -18,6 +18,16 @@
             <div class="hud-label">🦌 已喂鹿数</div>
             <div class="hud-value"><span id="score-count">0</span> / <span id="total-count">8</span></div>
           </div>
+          <div class="hud-center">
+            <div class="hud-item">
+              <div class="hud-label">🍘 仙贝</div>
+              <div class="hud-value" id="cracker-count">3</div>
+            </div>
+            <div class="hud-item">
+              <div class="hud-label">💰 金钱</div>
+              <div class="hud-value" id="money-count">0</div>
+            </div>
+          </div>
           <div class="hud-right">
             <div class="hud-label">⏱ 用时</div>
             <div class="hud-value" id="timer-value">00:00</div>
@@ -26,6 +36,15 @@
         <div id="status-text">去找小鹿喂食吧！</div>
         <div id="journal-hint" class="hidden">📖 按 [Tab] 打开鹿图鉴</div>
       </section>
+
+      <!-- Vendor hint -->
+      <div id="vendor-hint" class="hidden">
+        <div class="hint-icon">🏪</div>
+        <div class="hint-text">[E] 购买仙贝 (10円)</div>
+      </div>
+
+      <!-- Toast message -->
+      <div id="toast" class="hidden">错误信息</div>
 
       <!-- Feed hint -->
       <div id="feed-hint" class="hidden">

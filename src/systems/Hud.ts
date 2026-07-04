@@ -8,6 +8,9 @@ export class Hud {
   private readonly completionOverlay = this.getElement('#completion-overlay');
   private readonly completionTime = this.getElement('#completion-time');
   private readonly completionScore = this.getElement('#completion-score');
+  private readonly crackerCount = this.getElement('#cracker-count');
+  private readonly moneyCount = this.getElement('#money-count');
+  private readonly vendorHint = this.getElement('#vendor-hint');
 
   setTarget(target: number): void {
     this.totalCount.textContent = String(target);
@@ -21,6 +24,9 @@ export class Hud {
     deerNearby: boolean,
     collectedCount?: number,
     obstacleNearby?: boolean,
+    crackers?: number,
+    money?: number,
+    vendorNearby?: boolean,
   ): void {
     // Score
     this.scoreCount.textContent = String(score);
@@ -29,6 +35,10 @@ export class Hud {
     const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
     const seconds = Math.floor(elapsed % 60).toString().padStart(2, '0');
     this.timerValue.textContent = `${minutes}:${seconds}`;
+
+    // Cracker count and money
+    if (crackers !== undefined) this.crackerCount.textContent = String(crackers);
+    if (money !== undefined) this.moneyCount.textContent = String(money);
 
     // Status
     if (complete) {
@@ -46,6 +56,13 @@ export class Hud {
       this.feedHint.textContent = '按 E 喂鹿 🦌';
     } else {
       this.feedHint.classList.add('hidden');
+    }
+
+    // Vendor hint
+    if (vendorNearby) {
+      this.vendorHint.classList.remove('hidden');
+    } else {
+      this.vendorHint.classList.add('hidden');
     }
 
     // Jump hint
@@ -78,6 +95,17 @@ export class Hud {
       ],
       { duration: 250, easing: 'ease-out' },
     );
+  }
+
+  showToast(msg: string, duration = 2000): void {
+    const el = this.getElement('#toast');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    el.classList.add('show');
+    setTimeout(() => {
+      el.classList.remove('show');
+      el.classList.add('hidden');
+    }, duration);
   }
 
   private getElement(selector: string): HTMLElement {
