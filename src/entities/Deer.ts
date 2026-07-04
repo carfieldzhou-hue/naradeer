@@ -661,6 +661,17 @@ export class Deer {
     this.fed = true;
   }
 
+  reset(): void {
+    this.fed = false;
+    this.state.current = DeerState.Wander;
+    this.state.timer = 0;
+    this.eatingTimer = 0;
+    this.happyTimer = 0;
+    this.angryTimer = 0;
+    this.group.position.copy(this.homePosition);
+    this.velocity.set(0, 0, 0);
+  }
+
   canBeFed(): boolean {
     return !this.fed;
   }

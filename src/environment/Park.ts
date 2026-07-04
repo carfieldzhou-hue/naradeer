@@ -9,6 +9,13 @@ export interface ParkBounds {
 
 const SPREAD = 3.5; // Scale factor for zone positions relative to original 24x18 map
 
+export interface MoneyTreeInfo {
+  group: THREE.Group;
+  position: THREE.Vector3;
+  moneyValue: number;
+  sprite: THREE.Sprite;
+}
+
 export class Park {
   readonly group = new THREE.Group();
   readonly trees: Tree[] = [];
@@ -465,6 +472,46 @@ export class Park {
       this.lanterns.push(lantern);
       this.group.add(lantern.group);
     }
+  }
+
+  createMoneyTrees(count: number, moneyValues: number[]): MoneyTreeInfo[] {
+    const treeGroups = this.trees.filter(t => {
+      const p = t.group.position;
+      return Math.abs(p.x) > 3 || Math.abs(p.z) > 3;
+    });
+    const shuffled = [...treeGroups].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, Math.min(count, shuffled.length));
+    const results: MoneyTreeInfo[] = [];
+
+    for (let i = 0; i < selected.length && i < moneyValues.length; i++) {
+      const g = selected[i].group;
+      const pos = g.position.clone();
+      pos.y += 1.2;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d')!;
+      const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, 'rgba(255, 215, 0, 0.5)');
+      grad.addColorStop(0.4, 'rgba(255, 215, 0, 0.2)');
+      grad.addColorStop(1, 'rgba(255, 215, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 64, 64);
+      ctx.fillStyle = '#ffd700';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('💰', 32, 40);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      sprite.scale.set(1.0, 1.0, 1);
+      sprite.position.copy(pos);
+      this.group.add(sprite);
+
+      results.push({ group: g, position: pos, moneyValue: moneyValues[i], sprite });
+    }
+    return results;
   }
 
   update(delta: number): void {

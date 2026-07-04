@@ -299,21 +299,83 @@ body {
   font-weight: 700;
 }
 
-#restart-button {
-  padding: 12px 32px;
-  background: #ffd54f;
+.completion-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+#restart-button,
+#next-level-button {
+  padding: 12px 24px;
   border: none;
   border-radius: 8px;
-  color: #1a1a1a;
   font-size: 1rem;
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.15s, background 0.15s;
 }
 
+#restart-button {
+  background: rgba(255, 255, 255, 0.15);
+  color: #f6f1df;
+}
+
 #restart-button:hover {
   transform: scale(1.05);
+  background: rgba(255, 255, 255, 0.25);
+}
+
+#next-level-button {
+  background: #ffd54f;
+  color: #1a1a1a;
+}
+
+#next-level-button:hover {
+  transform: scale(1.05);
   background: #ffca28;
+}
+
+/* ===== Money Tree Hint ===== */
+#money-tree-hint {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 8px;
+  padding: 6px 14px;
+  color: #ffd54f;
+  z-index: 15;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+/* ===== Share Button ===== */
+.share-btn {
+  position: absolute;
+  top: 80px;
+  right: 12px;
+  padding: 8px 14px;
+  background: rgba(255, 215, 0, 0.2);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 8px;
+  color: #ffd54f;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 15;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s, transform 0.15s;
+}
+
+.share-btn:hover {
+  background: rgba(255, 215, 0, 0.35);
+  transform: scale(1.05);
 }
 
 /* ===== Touch Controls ===== */

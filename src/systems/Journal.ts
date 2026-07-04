@@ -65,6 +65,12 @@ export class Journal {
     this.render();
   }
 
+  reset(): void {
+    this.collected.clear();
+    this.countEl.textContent = '0';
+    this.render();
+  }
+
   markCollected(index: number): void {
     if (!this.collected.has(index)) {
       this.collected.add(index);

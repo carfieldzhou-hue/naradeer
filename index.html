@@ -20,6 +20,10 @@
           </div>
           <div class="hud-center">
             <div class="hud-item">
+              <div class="hud-label">🏯 关卡</div>
+              <div class="hud-value" id="level-display">第 1 关</div>
+            </div>
+            <div class="hud-item">
               <div class="hud-label">🍘 仙贝</div>
               <div class="hud-value" id="cracker-count">3</div>
             </div>
@@ -40,7 +44,7 @@
       <!-- Vendor hint -->
       <div id="vendor-hint" class="hidden">
         <div class="hint-icon">🏪</div>
-        <div class="hint-text">[E] 购买仙贝 (10円)</div>
+        <div class="hint-text">[E] 购买仙贝 (100円)</div>
       </div>
 
       <!-- Toast message -->
@@ -52,6 +56,15 @@
         <div class="hint-text">[E] 喂食</div>
       </div>
 
+      <!-- Money tree hint -->
+      <div id="money-tree-hint" class="hidden">
+        <div class="hint-icon">🌳💰</div>
+        <div class="hint-text">[E] 摇树得钱</div>
+      </div>
+
+      <!-- Share button -->
+      <button id="share-button" type="button" class="hidden share-btn">📤 分享给好友 (100円)</button>
+
       <!-- Jump hint -->
       <div id="jump-hint" class="hidden">
         <div class="hint-text">[空格] 跳跃跨越障碍</div>
@@ -61,8 +74,8 @@
       <section id="completion-overlay" class="hidden">
         <div class="completion-card">
           <div class="completion-icon">🎉</div>
-          <h2>全部小鹿都喂饱啦！</h2>
-          <p class="completion-subtitle">谢谢你！下次再来玩哦 🦌</p>
+          <h2 id="level-title">第 1 关完成！</h2>
+          <p class="completion-subtitle" id="level-subtitle">继续挑战下一关吧 🦌</p>
           <div class="completion-stats">
             <div class="stat">
               <span class="stat-label">用时</span>
@@ -73,7 +86,10 @@
               <span class="stat-value" id="completion-score">0</span>
             </div>
           </div>
-          <button id="restart-button" type="button">再玩一次</button>
+          <div class="completion-buttons">
+            <button id="next-level-button" type="button">下一关 ▶</button>
+            <button id="restart-button" type="button">重新开始</button>
+          </div>
         </div>
       </section>
 

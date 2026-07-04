@@ -5,7 +5,6 @@ import { loadVendorTemplate } from './entities/VendorModel';
 
 const canvasEl = document.querySelector<HTMLCanvasElement>('#game-canvas');
 const startBtn = document.getElementById('start-button');
-const restartBtn = document.getElementById('restart-button');
 const titleOverlay = document.getElementById('title-overlay');
 
 if (!canvasEl) {
@@ -34,13 +33,6 @@ async function startGame(): Promise<void> {
 }
 
 startBtn?.addEventListener('click', startGame);
-restartBtn?.addEventListener('click', () => {
-  const overlay = document.getElementById('completion-overlay');
-  if (overlay) {
-    overlay.classList.remove('show');
-  }
-  startGame();
-});
 
 // Touch the overlay to start
 titleOverlay?.addEventListener('pointerdown', (e) => {
