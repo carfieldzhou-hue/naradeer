@@ -360,10 +360,6 @@ body {
 }
 
 /* ===== Share Button ===== */
-#share-button.hidden {
-  display: none;
-}
-
 .share-btn {
   position: absolute;
   top: 80px;

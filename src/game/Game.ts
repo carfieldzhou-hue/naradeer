@@ -279,8 +279,8 @@ export class Game {
     const far = Math.max(this.currentBounds.halfWidth, this.currentBounds.halfDepth) * 1.5;
     this.scene.fog = new THREE.Fog('#c8e6c9', far * 0.3, far);
 
-    for (const deer of this.deerList) deer.reset();
-    this.journal.reset();
+    for (const deer of this.deerList) deer.reset(level);
+    this.journal.updateEntries(this.deerList.map((d) => d.getDeerInfo()));
     this.createChests(this.levelConfig.moneyPool);
     this.createVendorsForLevel(level);
     this.setupMoneyTrees();
@@ -468,21 +468,32 @@ export class Game {
   doShare(): void {
     if (this.shareUsedThisLevel || this.levelComplete) return;
     const url = window.location.href;
-    const shareData = { title: '奈良公园 - 喂鹿游戏', text: '来奈良公园喂鹿吧！我正在挑战第 ' + this.currentLevel + ' 关！', url };
+    const text = '来奈良公园喂鹿吧！我正在挑战第 ' + this.currentLevel + ' 关！\n' + url;
 
-    if (navigator.share) {
-      navigator.share(shareData).then(() => {
-        this.rewardShare();
-      }).catch(() => {
-        // User cancelled
-      });
-    } else {
-      navigator.clipboard.writeText(url).then(() => {
-        this.rewardShare();
-      }).catch(() => {
-        this.hud.showToast('复制链接失败');
-      });
-    }
+    const shareSuccess = () => {
+      this.rewardShare();
+      this.hud.showToast('分享成功！获得 100 円 🎉');
+    };
+
+    const tryClipboard = () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(shareSuccess).catch(tryWebShare);
+      } else {
+        tryWebShare();
+      }
+    };
+
+    const tryWebShare = () => {
+      if (navigator.share) {
+        navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url }).then(shareSuccess).catch(() => {
+          this.hud.showToast('分享取消或失败，请重试');
+        });
+      } else {
+        this.hud.showToast('分享失败：浏览器不支持');
+      }
+    };
+
+    tryClipboard();
   }
 
   private rewardShare(): void {
@@ -490,7 +501,6 @@ export class Game {
     this.shareUsedThisLevel = true;
     this.money += 100;
     this.audio.feed();
-    this.hud.showToast('分享成功！获得 100 円 🎉');
     this.hud.setShareAvailable(false);
   }
 

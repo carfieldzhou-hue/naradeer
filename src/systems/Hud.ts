@@ -30,11 +30,7 @@ export class Hud {
   }
 
   setShareAvailable(available: boolean): void {
-    if (available) {
-      this.shareButton.classList.remove('hidden');
-    } else {
-      this.shareButton.classList.add('hidden');
-    }
+    this.shareButton.style.display = available ? 'block' : 'none';
   }
 
   update(

@@ -167,6 +167,8 @@ export class Deer {
   readonly hasAntlers: boolean;
 
   fed = false;
+  available = true;
+  readonly minLevel: number;
 
   readonly personality: DeerPersonality;
   readonly rarity: DeerRarity;
@@ -185,6 +187,7 @@ export class Deer {
     this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Normal;
     this.specialVariant = SPECIAL_VARIANT_BY_INDEX[index] ?? 'none';
     this.rarity = RARITY_BY_INDEX[index] ?? DeerRarity.Common;
+    this.minLevel = this.rarity === DeerRarity.Legendary ? 4 : this.rarity === DeerRarity.Rare ? 3 : this.rarity === DeerRarity.Uncommon ? 2 : 1;
     this.isMale = GENDER_BY_INDEX[index] === 1;
     this.hasAntlers = ANTLERS_BY_INDEX[index];
 
@@ -661,8 +664,10 @@ export class Deer {
     this.fed = true;
   }
 
-  reset(): void {
+  reset(level: number): void {
+    this.available = this.minLevel <= level;
     this.fed = false;
+    this.group.visible = this.available;
     this.state.current = DeerState.Wander;
     this.state.timer = 0;
     this.eatingTimer = 0;
@@ -673,7 +678,7 @@ export class Deer {
   }
 
   canBeFed(): boolean {
-    return !this.fed;
+    return !this.fed && this.available;
   }
 
   isHappy(): boolean {

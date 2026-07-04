@@ -41,6 +41,13 @@ export class Journal {
   private readonly totalEl: HTMLElement;
   private isOpen = false;
 
+  updateEntries(entries: DeerEntry[]): void {
+    this.entries.length = 0;
+    this.entries.push(...entries);
+    this.totalEl.textContent = String(this.entries.length);
+    this.render();
+  }
+
   constructor(entries: DeerEntry[]) {
     this.entries = entries;
 
