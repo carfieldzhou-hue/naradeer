@@ -4,6 +4,7 @@ export interface DeerEntry {
   index: number;
   name: string;
   personality: string;
+  personalityLabel: string;
   rarity: DeerRarity;
   specialVariant: string;
   isMale: boolean;
@@ -174,7 +175,7 @@ export class Journal {
       const type = document.createElement('div');
       type.className = 'deer-personality';
       if (collected) {
-        type.textContent = entry.personality;
+        type.textContent = entry.personalityLabel;
         if (entry.isMale) type.textContent += ' ♂';
         else type.textContent += ' ♀';
       } else {

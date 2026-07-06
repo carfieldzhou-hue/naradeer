@@ -14,11 +14,11 @@ export enum DeerState {
 }
 
 export enum DeerPersonality {
-  Normal = 'normal',
+  Gentle = 'gentle',
   Shy = 'shy',
-  Friendly = 'friendly',
-  Playful = 'playful',
-  Lazy = 'lazy',
+  Curious = 'curious',
+  Aloof = 'aloof',
+  Aggressive = 'aggressive',
 }
 
 export enum DeerRarity {
@@ -28,23 +28,34 @@ export enum DeerRarity {
   Legendary = 'legendary',
 }
 
+function getPersonalityLabel(p: DeerPersonality): string {
+  const labels: Record<DeerPersonality, string> = {
+    [DeerPersonality.Gentle]: '温顺',
+    [DeerPersonality.Shy]: '害羞',
+    [DeerPersonality.Curious]: '好奇',
+    [DeerPersonality.Aloof]: '高冷',
+    [DeerPersonality.Aggressive]: '暴躁',
+  };
+  return labels[p];
+}
+
 const PERSONALITY_BY_INDEX: DeerPersonality[] = [
-  DeerPersonality.Playful,
-  DeerPersonality.Shy,
-  DeerPersonality.Friendly,
-  DeerPersonality.Lazy,
-  DeerPersonality.Normal,
-  DeerPersonality.Shy,
-  DeerPersonality.Friendly,
-  DeerPersonality.Playful,
-  DeerPersonality.Normal,
-  DeerPersonality.Lazy,
-  DeerPersonality.Shy,
-  DeerPersonality.Friendly,
-  DeerPersonality.Playful,
-  DeerPersonality.Normal,
-  DeerPersonality.Lazy,
-  DeerPersonality.Shy,
+  DeerPersonality.Gentle,    // 0
+  DeerPersonality.Curious,   // 1
+  DeerPersonality.Gentle,    // 2
+  DeerPersonality.Shy,       // 3
+  DeerPersonality.Gentle,    // 4
+  DeerPersonality.Curious,   // 5
+  DeerPersonality.Gentle,    // 6
+  DeerPersonality.Shy,       // 7
+  DeerPersonality.Aloof,     // 8
+  DeerPersonality.Gentle,    // 9
+  DeerPersonality.Curious,   // 10
+  DeerPersonality.Shy,       // 11
+  DeerPersonality.Aloof,     // 12
+  DeerPersonality.Aggressive, // 13
+  DeerPersonality.Gentle,    // 14
+  DeerPersonality.Shy,       // 15
 ];
 
 const SPECIAL_VARIANT_BY_INDEX: string[] = [
@@ -158,6 +169,10 @@ export class Deer {
   private happyBob = 0;
   private angryTimer = 0;
 
+  aggressiveState: 'idle' | 'warning' | 'charging' | 'fleeing' = 'idle';
+  aggressiveCooldown = 0;
+  private chargeTarget = new THREE.Vector3();
+
   // Feed indicator (3D world-space prompt)
   private readonly feedIndicator: THREE.Sprite;
 
@@ -184,7 +199,7 @@ export class Deer {
     this.tuning = { ...DEFAULT_TUNING, ...tuning };
     this.homePosition = position.clone();
     this.wanderTarget = position.clone();
-    this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Normal;
+    this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Gentle;
     this.specialVariant = SPECIAL_VARIANT_BY_INDEX[index] ?? 'none';
     this.rarity = RARITY_BY_INDEX[index] ?? DeerRarity.Common;
     this.minLevel = this.rarity === DeerRarity.Legendary ? 4 : this.rarity === DeerRarity.Rare ? 3 : this.rarity === DeerRarity.Uncommon ? 2 : 1;
@@ -263,11 +278,11 @@ export class Deer {
   private applyVisualStyle(): void {
     // Color palette by personality
     const PERSONALITY_COLORS: Record<string, { tint: string; emissive?: string; emissiveIntensity?: number }> = {
-      [DeerPersonality.Normal]:  { tint: '#ffffff' },  // No tint
-      [DeerPersonality.Shy]:     { tint: '#e8d4f0' },  // Light purple
-      [DeerPersonality.Friendly]:{ tint: '#d4e8f0' },  // Light blue
-      [DeerPersonality.Playful]: { tint: '#f0e8d4' },  // Warm cream
-      [DeerPersonality.Lazy]:    { tint: '#d4f0e8' },  // Mint green
+      [DeerPersonality.Gentle]:    { tint: '#ffffff' },
+      [DeerPersonality.Shy]:       { tint: '#e8d4f0' },
+      [DeerPersonality.Curious]:   { tint: '#d4e8f0' },
+      [DeerPersonality.Aloof]:     { tint: '#f0e8d4' },
+      [DeerPersonality.Aggressive]:{ tint: '#ffcdd2' },
     };
 
     // Rarity glow colors
@@ -278,7 +293,7 @@ export class Deer {
       [DeerRarity.Legendary]: { color: '#ffd54f', intensity: 0.18 },  // Gold
     };
 
-    const personalityStyle = PERSONALITY_COLORS[this.personality] ?? PERSONALITY_COLORS[DeerPersonality.Normal];
+    const personalityStyle = PERSONALITY_COLORS[this.personality] ?? PERSONALITY_COLORS[DeerPersonality.Gentle];
     const rarityStyle = RARITY_GLOW[this.rarity] ?? RARITY_GLOW[DeerRarity.Common];
 
     // Apply color tint and emissive to all meshes
@@ -382,15 +397,49 @@ export class Deer {
     this.playerVel.copy(playerPosition).sub(this.prevPlayerPos).divideScalar(Math.max(delta, 0.001));
     this.prevPlayerPos.copy(playerPosition);
 
-    // Check if player is near and has no crackers -> become angry
-    if (distToPlayer < 1.5 && !playerHasCrackers && this.state.current !== DeerState.Eating && this.state.current !== DeerState.Happy && this.state.current !== DeerState.Angry) {
-      this.state.current = DeerState.Angry;
-      this.angryTimer = 1.5;
-      // Push player away
-      const pushDir = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
-      pushDir.y = 0;
-      pushDir.normalize().multiplyScalar(-3); // Push away
-      this.velocity.copy(pushDir);
+    if (this.personality === DeerPersonality.Aggressive) {
+      this.updateAggressive(delta, playerPosition, distToPlayer);
+    } else {
+      // Check if player is near and has no crackers -> become angry
+      if (distToPlayer < 1.5 && !playerHasCrackers && this.state.current !== DeerState.Eating && this.state.current !== DeerState.Happy && this.state.current !== DeerState.Angry) {
+        this.state.current = DeerState.Angry;
+        this.angryTimer = 1.5;
+        const pushDir = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
+        pushDir.y = 0;
+        pushDir.normalize().multiplyScalar(-3);
+        this.velocity.copy(pushDir);
+      }
+    }
+
+    if (this.personality !== DeerPersonality.Aggressive || this.aggressiveState === 'idle') {
+      switch (this.personality) {
+        case DeerPersonality.Gentle:
+          if (distToPlayer < 5 && distToPlayer > 2.5 && this.state.current === DeerState.Idle) {
+            this.wanderTarget.copy(playerPosition);
+            this.state.current = DeerState.Wander;
+          }
+          break;
+        case DeerPersonality.Shy:
+          if (distToPlayer < 4 && this.state.current === DeerState.Idle) {
+            const fleeDir = this.group.position.clone().sub(playerPosition).normalize();
+            this.wanderTarget.copy(this.group.position).add(fleeDir.multiplyScalar(3));
+            this.state.current = DeerState.Wander;
+          }
+          break;
+        case DeerPersonality.Curious:
+          if (distToPlayer > 3 && distToPlayer < 6 && this.state.current === DeerState.Idle) {
+            this.wanderTarget.copy(playerPosition);
+            this.state.current = DeerState.Wander;
+          }
+          break;
+        case DeerPersonality.Aloof:
+          if (distToPlayer < 2.5 && this.state.current === DeerState.Idle) {
+            const away = this.group.position.clone().sub(playerPosition).normalize();
+            this.wanderTarget.copy(this.group.position).add(away.multiplyScalar(5));
+            this.state.current = DeerState.Wander;
+          }
+          break;
+      }
     }
 
     // State machine
@@ -484,7 +533,7 @@ export class Deer {
         case DeerRarity.Rare: rarityWanderMult = 1.8; break;
         case DeerRarity.Legendary: rarityWanderMult = 2.5; break;
       }
-      const wr = this.tuning.wanderRadius * (this.personality === DeerPersonality.Lazy ? 0.5 : 1) * rarityWanderMult;
+      const wr = this.tuning.wanderRadius * (this.personality === DeerPersonality.Aloof ? 0.6 : 1) * rarityWanderMult;
       this.wanderTarget.set(
         this.homePosition.x + (Math.random() - 0.5) * wr,
         0,
@@ -499,7 +548,7 @@ export class Deer {
     }
 
     // Move toward target
-    const wanderSpeedMult = this.personality === DeerPersonality.Playful ? 1.5 : this.personality === DeerPersonality.Lazy ? 0.4 : 1;
+    const wanderSpeedMult = this.personality === DeerPersonality.Curious ? 1.3 : this.personality === DeerPersonality.Aloof ? 0.7 : 1;
     const speed = this.tuning.wanderSpeed * wanderSpeedMult * (0.5 + Math.random() * 0.5);
     toTarget.normalize();
     this.velocity.lerp(toTarget.multiplyScalar(speed), delta * 3);
@@ -575,7 +624,7 @@ export class Deer {
     // Stop at a comfortable distance
     if (dist < 1.2) {
       this.state.current = DeerState.Bow;
-      const bowMult = this.personality === DeerPersonality.Playful ? 0.6 : this.personality === DeerPersonality.Lazy ? 1.8 : 1;
+      const bowMult = this.personality === DeerPersonality.Curious ? 0.6 : this.personality === DeerPersonality.Aloof ? 1.5 : 1;
       this.state.timer = this.tuning.bowDuration * bowMult;
       this.velocity.set(0, 0, 0);
       return;
@@ -586,7 +635,7 @@ export class Deer {
       return;
     }
 
-    const approachSpeedMult = this.personality === DeerPersonality.Shy ? 0.7 : this.personality === DeerPersonality.Friendly ? 1.3 : 1;
+    const approachSpeedMult = this.personality === DeerPersonality.Shy ? 0.7 : this.personality === DeerPersonality.Gentle ? 1.2 : 1;
     const speed = this.tuning.approachSpeed * approachSpeedMult * Math.min(dist / 3, 1);
     toPlayer.normalize();
     this.velocity.lerp(toPlayer.multiplyScalar(speed), delta * 3);
@@ -627,7 +676,7 @@ export class Deer {
     this.group.position.y = Math.abs(Math.sin(this.happyBob)) * 0.12;
 
     if (this.happyTimer <= 0) {
-      if (this.personality === DeerPersonality.Friendly) {
+      if (this.personality === DeerPersonality.Gentle) {
         this.state.current = DeerState.Approach;
         this.friendlyFollowTimer = 3;
       } else {
@@ -657,7 +706,44 @@ export class Deer {
     }
   }
 
-  // Call when player feeds the deer
+  private updateAggressive(delta: number, playerPosition: THREE.Vector3, distToPlayer: number): void {
+    if (this.aggressiveCooldown > 0) {
+      this.aggressiveCooldown -= delta;
+      return;
+    }
+    switch (this.aggressiveState) {
+      case 'idle':
+        if (distToPlayer < 3) {
+          this.aggressiveState = 'warning';
+        }
+        break;
+      case 'warning':
+        if (distToPlayer > 5) {
+          this.aggressiveState = 'idle';
+        } else if (distToPlayer < 1.5) {
+          this.aggressiveState = 'charging';
+          this.chargeTarget.copy(playerPosition);
+        }
+        break;
+      case 'charging':
+        const dir = this.chargeTarget.clone().sub(this.group.position).normalize();
+        this.velocity.copy(dir.multiplyScalar(4 * delta));
+        this.group.position.addScaledVector(this.velocity, delta);
+        this.velocity.set(0, 0, 0);
+        break;
+      case 'fleeing':
+        const fleeDir = this.group.position.clone().sub(this.chargeTarget).normalize();
+        this.velocity.copy(fleeDir.multiplyScalar(3 * delta));
+        this.group.position.addScaledVector(this.velocity, delta);
+        this.velocity.set(0, 0, 0);
+        if (this.group.position.distanceTo(this.chargeTarget) > 10) {
+          this.aggressiveState = 'idle';
+          this.aggressiveCooldown = 5;
+        }
+        break;
+    }
+  }
+
   startEating(): void {
     this.state.current = DeerState.Eating;
     this.eatingTimer = this.tuning.eatDuration;
@@ -673,6 +759,8 @@ export class Deer {
     this.eatingTimer = 0;
     this.happyTimer = 0;
     this.angryTimer = 0;
+    this.aggressiveState = 'idle';
+    this.aggressiveCooldown = 0;
     this.group.position.copy(this.homePosition);
     this.velocity.set(0, 0, 0);
   }
@@ -685,7 +773,7 @@ export class Deer {
     return this.state.current === DeerState.Happy;
   }
 
-  getDeerInfo(): { index: number; personality: DeerPersonality; rarity: DeerRarity; specialVariant: string; fed: boolean; name: string; isMale: boolean; hasAntlers: boolean } {
+  getDeerInfo() {
     let name: string;
     if (this.specialVariant === 'golden') {
       name = '小金子';
@@ -693,32 +781,33 @@ export class Deer {
       name = '花仙子';
     } else {
       switch (this.personality) {
-        case DeerPersonality.Normal:
-          name = '小鹿';
+        case DeerPersonality.Gentle:
+          name = '小乖';
           break;
         case DeerPersonality.Shy:
           name = '小害羞';
           break;
-        case DeerPersonality.Friendly:
-          name = '小跟班';
+        case DeerPersonality.Curious:
+          name = '小好奇';
           break;
-        case DeerPersonality.Playful:
-          name = '小跳跳';
+        case DeerPersonality.Aloof:
+          name = '小高冷';
           break;
-        case DeerPersonality.Lazy:
-          name = '小懒懒';
+        case DeerPersonality.Aggressive:
+          name = '小暴躁';
           break;
       }
     }
     return {
       index: this.index,
-      personality: this.personality,
-      rarity: this.rarity,
-      specialVariant: this.specialVariant,
-      fed: this.fed,
       name: name!,
+      rarity: this.rarity,
+      personality: this.personality,
+      personalityLabel: getPersonalityLabel(this.personality),
       isMale: this.isMale,
       hasAntlers: this.hasAntlers,
+      specialVariant: this.specialVariant,
+      fed: this.fed,
     };
   }
 
@@ -731,7 +820,7 @@ export class Deer {
       case DeerRarity.Legendary: range *= 0.4; break;
     }
     if (this.personality === DeerPersonality.Shy) range *= 1.3;
-    if (this.personality === DeerPersonality.Friendly) range *= 1.5;
+    if (this.personality === DeerPersonality.Gentle) range *= 1.4;
     return range;
   }
 

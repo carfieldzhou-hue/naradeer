@@ -3,7 +3,7 @@ import { InputController } from '../core/InputController';
 import { Loop } from '../core/Loop';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
 import { Player, type ArenaBounds } from '../entities/Player';
-import { Deer } from '../entities/Deer';
+import { Deer, DeerPersonality } from '../entities/Deer';
 import { Obstacle } from '../entities/Obstacle';
 import { Vendor } from '../entities/Vendor';
 import { TreasureChest } from '../entities/TreasureChest';
@@ -320,6 +320,21 @@ export class Game {
 
     for (const deer of this.deerList) {
       deer.update(delta, this.player.group.position, this.crackerCount > 0);
+    }
+
+    const playerPos = this.player.group.position;
+    for (const deer of this.deerList) {
+      if (deer.personality === DeerPersonality.Aggressive && deer.aggressiveState === 'charging') {
+        const dist = playerPos.distanceTo(deer.group.position);
+        if (dist < 0.5 && this.crackerCount > 0) {
+          this.crackerCount--;
+          this.audio.error();
+          this.hud.showToast('被暴躁鹿撞到！-1 仙贝 😠');
+          const pushDir = playerPos.clone().sub(deer.group.position).normalize();
+          this.player.group.position.add(pushDir.multiplyScalar(1.5));
+          deer.aggressiveState = 'fleeing';
+        }
+      }
     }
 
     this.obstacleNearby = false;
