@@ -475,25 +475,45 @@ export class Game {
       this.hud.showToast('分享成功！获得 100 円 🎉');
     };
 
-    const tryClipboard = () => {
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(shareSuccess).catch(tryWebShare);
-      } else {
-        tryWebShare();
-      }
-    };
+    // 立即反馈
+    this.hud.showToast('正在准备分享…');
 
-    const tryWebShare = () => {
-      if (navigator.share) {
-        navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url }).then(shareSuccess).catch(() => {
-          this.hud.showToast('分享取消或失败，请重试');
+    // 优先 Web Share API（手机原生分享面板）
+    if (navigator.share) {
+      navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url })
+        .then(shareSuccess)
+        .catch(() => {
+          this.tryClipboardShare(text, shareSuccess);
         });
-      } else {
-        this.hud.showToast('分享失败：浏览器不支持');
-      }
-    };
+    } else {
+      this.tryClipboardShare(text, shareSuccess);
+    }
+  }
 
-    tryClipboard();
+  private tryClipboardShare(text: string, onSuccess: () => void): void {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
+        this.fallbackShare(text, onSuccess);
+      });
+    } else {
+      this.fallbackShare(text, onSuccess);
+    }
+  }
+
+  private fallbackShare(text: string, onSuccess: () => void): void {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      onSuccess();
+    } catch {
+      this.hud.showToast('复制链接失败，请手动分享此页面 🙏');
+    }
+    document.body.removeChild(textarea);
   }
 
   private rewardShare(): void {
