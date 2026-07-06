@@ -216,6 +216,7 @@ export class Game {
   }
 
   start(): void {
+    this.audio.startBGM(this.currentLevel);
     this.loop.start();
   }
 
@@ -257,6 +258,9 @@ export class Game {
     this.moneyTreeShakeTimer = 0;
     this.moneyTreeShakeGroup = null;
     this.elapsed = 0;
+
+    this.audio.stopBGM();
+    this.audio.startBGM(this.currentLevel);
 
     this.player.group.position.set(0, 0, 0);
     this.player.velocity.set(0, 0, 0);

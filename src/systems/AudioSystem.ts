@@ -1,7 +1,14 @@
 export class AudioSystem {
+  private readonly PENTATONIC = [261.63, 293.66, 329.63, 392.00, 440.00];
+
   private context: AudioContext | null = null;
   private unlocked = false;
   private masterGain: GainNode | null = null;
+
+  private bgmGain: GainNode | null = null;
+  private bgmOscillators: OscillatorNode[] = [];
+  private bgmInterval: number | null = null;
+  private bgmPlaying = false;
 
   constructor() {
     const unlock = () => {
@@ -220,7 +227,186 @@ export class AudioSystem {
     osc.stop(now + 0.3);
   }
 
+  startBGM(level: number): void {
+    if (!this.context || this.bgmPlaying) return;
+    this.bgmPlaying = true;
+
+    this.bgmGain = this.context.createGain();
+    this.bgmGain.gain.value = 0.08;
+    this.bgmGain.connect(this.masterGain!);
+
+    const melody = this.context.createOscillator();
+    melody.type = 'triangle';
+    const melodyFilter = this.context.createBiquadFilter();
+    melodyFilter.type = 'lowpass';
+    melodyFilter.frequency.value = 800;
+    melody.connect(melodyFilter);
+    melodyFilter.connect(this.bgmGain);
+
+    const harmony = this.context.createOscillator();
+    harmony.type = 'sine';
+    const harmonyGain = this.context.createGain();
+    harmonyGain.gain.value = 0.04;
+    harmony.connect(harmonyGain);
+    harmonyGain.connect(this.bgmGain);
+
+    const drumGain = this.context.createGain();
+    drumGain.gain.value = 0.05;
+    drumGain.connect(this.bgmGain);
+
+    this.bgmOscillators = [melody, harmony];
+    melody.start();
+    harmony.start();
+
+    const bpm = Math.min(60 + Math.floor((level - 1) / 5) * 5, 80);
+    const noteDuration = 60 / bpm;
+    let noteIndex = 0;
+
+    const playNextNote = () => {
+      if (!this.context || !this.bgmPlaying) return;
+      const now = this.context.currentTime;
+      const freq = this.PENTATONIC[noteIndex % this.PENTATONIC.length];
+      melody.frequency.setValueAtTime(freq, now);
+      melody.frequency.exponentialRampToValueAtTime(freq * 1.01, now + noteDuration * 0.5);
+      harmony.frequency.setValueAtTime(freq * 0.5, now);
+      noteIndex++;
+      if (noteIndex % 4 === 0) {
+        const drumOSc = this.context.createOscillator();
+        drumOSc.type = 'sine';
+        drumOSc.frequency.value = 60;
+        const drumEnv = this.context.createGain();
+        drumEnv.gain.setValueAtTime(0.08, now);
+        drumEnv.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+        drumOSc.connect(drumEnv);
+        drumEnv.connect(drumGain);
+        drumOSc.start(now);
+        drumOSc.stop(now + 0.2);
+      }
+      this.bgmInterval = window.setTimeout(playNextNote, noteDuration * 1000);
+    };
+    playNextNote();
+  }
+
+  stopBGM(): void {
+    this.bgmPlaying = false;
+    if (this.bgmInterval !== null) {
+      clearTimeout(this.bgmInterval);
+      this.bgmInterval = null;
+    }
+    for (const osc of this.bgmOscillators) {
+      try { osc.stop(); } catch { /* already stopped */ }
+    }
+    this.bgmOscillators = [];
+    this.bgmGain = null;
+  }
+
+  splash(): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    const osc = this.context.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(200, now);
+    osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    osc.connect(gain);
+    gain.connect(this.masterGain!);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  }
+
+  angryDeer(): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    const osc = this.context.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 80;
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.masterGain!);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  }
+
+  coin(): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const osc = this.context.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200 + i * 400, now + i * 0.04);
+      osc.frequency.exponentialRampToValueAtTime(1800 + i * 400, now + i * 0.04 + 0.05);
+      const gain = this.context.createGain();
+      gain.gain.setValueAtTime(0.06, now + i * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.04 + 0.1);
+      osc.connect(gain);
+      gain.connect(this.masterGain!);
+      osc.start(now + i * 0.04);
+      osc.stop(now + i * 0.04 + 0.12);
+    }
+  }
+
+  buyCracker(): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    const bufferSize = this.context.sampleRate * 0.05;
+    const buffer = this.context.createBuffer(1, bufferSize, this.context.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.3;
+    }
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 2000;
+    filter.Q.value = 0.5;
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0.06, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    source.connect(filter).connect(gain);
+    gain.connect(this.masterGain!);
+    source.start(now);
+  }
+
+  heartbeat(intensity: number): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    const osc = this.context.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 40;
+    const gain = this.context.createGain();
+    gain.gain.setValueAtTime(0.06, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(this.masterGain!);
+    osc.start(now);
+    osc.stop(now + 0.15);
+  }
+
+  adComplete(): void {
+    if (!this.context) return;
+    const now = this.context.currentTime;
+    for (let i = 0; i < 3; i++) {
+      const osc = this.context.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(600 + i * 200, now + i * 0.06);
+      osc.frequency.exponentialRampToValueAtTime(800 + i * 200, now + i * 0.06 + 0.08);
+      const gain = this.context.createGain();
+      gain.gain.setValueAtTime(0.05, now + i * 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.06 + 0.15);
+      osc.connect(gain);
+      gain.connect(this.masterGain!);
+      osc.start(now + i * 0.06);
+      osc.stop(now + i * 0.06 + 0.2);
+    }
+  }
+
   dispose(): void {
+    this.stopBGM();
     void this.context?.close();
     this.context = null;
   }
