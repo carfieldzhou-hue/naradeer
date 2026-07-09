@@ -702,7 +702,7 @@ export class AudioSystem {
       setPosition?: (x: number, y: number, z: number) => void;
     };
     const t = ctx.currentTime;
-    if (anyP.positionX) {
+    if (anyP.positionX && anyP.positionY && anyP.positionZ) {
       anyP.positionX.setValueAtTime(pos.x, t);
       anyP.positionY.setValueAtTime(pos.y, t);
       anyP.positionZ.setValueAtTime(pos.z, t);
@@ -851,20 +851,18 @@ export class AudioSystem {
     };
     const t = ctx.currentTime;
     const u = up ?? this.listenerUp;
-    if (l.positionX) {
+    if (l.positionX && l.positionY && l.positionZ &&
+        l.forwardX && l.forwardY && l.forwardZ &&
+        l.upX && l.upY && l.upZ) {
       l.positionX.setValueAtTime(pos.x, t);
       l.positionY.setValueAtTime(pos.y, t);
       l.positionZ.setValueAtTime(pos.z, t);
-      if (l.forwardX) {
-        l.forwardX.setValueAtTime(forward.x, t);
-        l.forwardY.setValueAtTime(forward.y, t);
-        l.forwardZ.setValueAtTime(forward.z, t);
-      }
-      if (l.upX) {
-        l.upX.setValueAtTime(u.x, t);
-        l.upY.setValueAtTime(u.y, t);
-        l.upZ.setValueAtTime(u.z, t);
-      }
+      l.forwardX.setValueAtTime(forward.x, t);
+      l.forwardY.setValueAtTime(forward.y, t);
+      l.forwardZ.setValueAtTime(forward.z, t);
+      l.upX.setValueAtTime(u.x, t);
+      l.upY.setValueAtTime(u.y, t);
+      l.upZ.setValueAtTime(u.z, t);
     } else {
       l.setPosition?.(pos.x, pos.y, pos.z);
       l.setOrientation?.(forward.x, forward.y, forward.z, u.x, u.y, u.z);
