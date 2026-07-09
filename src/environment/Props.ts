@@ -523,3 +523,58 @@ export class Temple {
     });
   }
 }
+
+export class PushableBench {
+  readonly group = new THREE.Group();
+  readonly position: THREE.Vector3;
+  readonly defaultZ: number;
+  pushed = false;
+  animProgress = 0;
+  animating = false;
+
+  constructor(x: number, z: number) {
+    this.position = new THREE.Vector3(x, 0, z);
+    this.defaultZ = z;
+    this.group.position.set(x, 0, z);
+
+    const seatMat = new THREE.MeshStandardMaterial({ color: '#8d6e63', roughness: 0.7, metalness: 0.1 });
+    const legMat = new THREE.MeshStandardMaterial({ color: '#5d4037', roughness: 0.8, metalness: 0.05 });
+
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.08, 0.35), seatMat);
+    seat.position.y = 0.32;
+    seat.castShadow = true;
+    seat.receiveShadow = true;
+    this.group.add(seat);
+
+    for (const lz of [-0.12, 0.12]) {
+      for (const lx of [-0.3, 0.3]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.06), legMat);
+        leg.position.set(lx, 0.14, lz);
+        leg.castShadow = true;
+        this.group.add(leg);
+      }
+    }
+  }
+
+  update(delta: number): void {
+    if (!this.animating) return;
+    this.animProgress += delta * 0.5;
+    if (this.animProgress >= 1) {
+      this.animProgress = 1;
+      this.animating = false;
+      this.pushed = true;
+    }
+    const slide = Math.sin(this.animProgress * Math.PI / 2) * 2;
+    this.group.position.z = this.defaultZ + slide;
+  }
+
+  isPlayerNear(playerPos: THREE.Vector3): boolean {
+    return !this.pushed && this.group.position.distanceTo(playerPos) < 1.5;
+  }
+
+  activate(): void {
+    if (this.pushed || this.animating) return;
+    this.animating = true;
+    this.animProgress = 0;
+  }
+}

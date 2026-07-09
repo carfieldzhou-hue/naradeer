@@ -38,13 +38,19 @@
           </div>
         </div>
         <div id="status-text">去找小鹿喂食吧！</div>
-        <div id="journal-hint" class="hidden">📖 按 [Tab] 打开鹿图鉴</div>
+        <div id="journal-hint" class="hidden">
+          <span class="desktop-only">📖 按 [Tab] 打开鹿图鉴</span>
+          <span class="mobile-only">📖 打开鹿图鉴</span>
+        </div>
       </section>
 
       <!-- Vendor hint -->
       <div id="vendor-hint" class="hidden">
         <div class="hint-icon">🏪</div>
-        <div class="hint-text">[E] 购买仙贝 (100円)</div>
+        <div class="hint-text">
+          <span class="desktop-only">[E] 购买仙贝 (100円)</span>
+          <span class="mobile-only">购买仙贝 (100円)</span>
+        </div>
       </div>
 
       <!-- Toast message -->
@@ -53,20 +59,26 @@
       <!-- Feed hint -->
       <div id="feed-hint" class="hidden">
         <div class="hint-icon">🦌</div>
-        <div class="hint-text">[E] 喂食</div>
+        <div class="hint-text">
+          <span class="desktop-only">按 E 喂鹿</span>
+          <span class="mobile-only">喂鹿</span>
+        </div>
       </div>
 
       <!-- Money tree hint -->
       <div id="money-tree-hint" class="hidden">
         <div class="hint-icon">🌳💰</div>
-        <div class="hint-text">[E] 摇树得钱</div>
+        <div class="hint-text">
+          <span class="desktop-only">[E] 摇树得钱</span>
+          <span class="mobile-only">摇树得钱</span>
+        </div>
       </div>
 
       <!-- Share button -->
       <button id="share-button" type="button" class="share-btn" style="display:none">📤 分享给好友 (100円)</button>
 
       <!-- Jump hint -->
-      <div id="jump-hint" class="hidden">
+      <div id="jump-hint" class="hidden desktop-only">
         <div class="hint-text">[空格] 跳跃跨越障碍</div>
       </div>
 
@@ -88,6 +100,7 @@
           </div>
           <div class="completion-buttons">
             <button id="next-level-button" type="button">下一关 ▶</button>
+            <button id="completion-share-button" type="button" class="completion-share-btn">📤 分享给好友 (+100円)</button>
             <button id="restart-button" type="button">重新开始</button>
           </div>
         </div>
@@ -108,15 +121,18 @@
         </div>
       </section>
 
-      <!-- Touch controls -->
+      <!-- Touch controls (one-handed: joystick + feed) -->
       <div id="touch-controls" aria-hidden="true">
         <div id="touch-stick">
           <div id="touch-knob"></div>
         </div>
-        <div class="touch-right">
-          <button id="feed-button" type="button" aria-label="喂食">🦌</button>
-          <button id="dash-button" type="button" aria-label="冲刺">🏃</button>
-        </div>
+        <button id="feed-button" type="button" aria-label="喂食">🦌</button>
+      </div>
+
+      <!-- Orientation overlay (mobile landscape -> portrait hint) -->
+      <div id="orientation-overlay" aria-hidden="true">
+        <div class="rotate-icon">📱</div>
+        <p>请旋转手机为竖屏模式以获得更好的游戏体验</p>
       </div>
 
       <!-- Title overlay -->
@@ -126,9 +142,10 @@
           <h1>奈良公園</h1>
           <p class="title-sub">来给鹿喂仙贝吧！</p>
           <div class="title-instructions">
-            <p>WASD / 摇杆移动 &nbsp; [空格] 跳跃</p>
-            <p>靠近小鹿后按 [E] 喂食</p>
-            <p>[Tab] 打开图鉴查看收集进度</p>
+            <p class="desktop-only">WASD / 摇杆移动 &nbsp; [空格] 跳跃</p>
+            <p class="mobile-only">摇杆移动 · 点击 🦌 喂食</p>
+            <p><span class="desktop-only">靠近小鹿后按 [E] 喂食</span><span class="mobile-only">靠近小鹿后点击 🦌 喂食</span></p>
+            <p><span class="desktop-only">[Tab] 打开图鉴查看收集进度</span><span class="mobile-only">点击 📖 打开图鉴查看收集进度</span></p>
           </div>
           <button id="start-button" type="button">开始游戏</button>
         </div>

@@ -68,7 +68,8 @@ export class Hud {
       this.feedHint.classList.add('hidden');
     } else if (deerNearby) {
       this.feedHint.classList.remove('hidden');
-      this.feedHint.textContent = '按 E 喂鹿 🦌';
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      this.feedHint.textContent = isTouch ? '喂鹿 🦌' : '按 E 喂鹿 🦌';
     } else {
       this.feedHint.classList.add('hidden');
     }
@@ -103,6 +104,8 @@ export class Hud {
       const subtitleEl = document.getElementById('level-subtitle');
       if (titleEl) titleEl.textContent = `第 ${level ?? 1} 关 完成！`;
       if (subtitleEl) subtitleEl.textContent = '继续挑战下一关吧 🦌';
+      // Hide the HUD share button while overlay is shown
+      this.shareButton.style.display = 'none';
     }
 
     const journalHint = this.getElement('#journal-hint');

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Tree } from './Tree';
-import { ToriiGate, StoneLantern, Temple, Bamboo, TempleBell, KoiFish, ViewingPlatform } from './Props';
+import { ToriiGate, StoneLantern, Temple, Bamboo, TempleBell, KoiFish, ViewingPlatform, PushableBench } from './Props';
 
 export interface ParkBounds {
   halfWidth: number;
@@ -14,6 +14,20 @@ export interface MoneyTreeInfo {
   sprite: THREE.Sprite;
 }
 
+export interface WaterZone {
+  x: number;
+  z: number;
+  radius: number;
+}
+
+export interface CoinPickup {
+  x: number;
+  z: number;
+  collected: boolean;
+  mesh?: THREE.Mesh;
+  glow?: THREE.Sprite;
+}
+
 export class Park {
   readonly group = new THREE.Group();
   trees: Tree[] = [];
@@ -24,6 +38,10 @@ export class Park {
   bells: TempleBell[] = [];
   koiFish: KoiFish[] = [];
   viewingPlatforms: ViewingPlatform[] = [];
+  readonly waterZones: WaterZone[] = [];
+  readonly coins: CoinPickup[] = [];
+  readonly pushableBench!: PushableBench;
+  readonly secretHedge!: THREE.Mesh;
   private groundMesh!: THREE.Mesh;
   private groundTexture!: THREE.CanvasTexture;
   private waterMeshes: THREE.Mesh[] = [];
@@ -67,9 +85,12 @@ export class Park {
     this._buildHillViewpoint(bounds);
     this._buildCherryAvenue(bounds);
     this._placeScatteredTrees(bounds);
+    this._scatterCoins(bounds);
+    this._scatterWaterHazards(bounds);
     this._placeFlowers(bounds);
     this._placeBushes(bounds);
     this._placeExtraLanterns(bounds);
+    this._setupBench(bounds);
   }
 
   regenerate(bounds: ParkBounds): void {
@@ -86,6 +107,8 @@ export class Park {
     this.koiFish = [];
     this.viewingPlatforms = [];
     this.waterMeshes = [];
+    this.waterZones.length = 0;
+    this.coins.length = 0;
     this.flowerMeshes = [];
     this.waterTime = 0;
     this._init(bounds);
@@ -229,6 +252,7 @@ export class Park {
     pond.position.set(c.x, 0.02, c.z);
     this.waterMeshes.push(pond);
     this.group.add(pond);
+    this.waterZones.push({ x: c.x, z: c.z, radius: 6 * this.spread / 3.5 });
 
     const sp = this.zx(2, 13);
     const smallPond = new THREE.Mesh(new THREE.CircleGeometry(2.5 * this.spread / 3.5, 16), waterMat);
@@ -236,6 +260,7 @@ export class Park {
     smallPond.position.set(sp.x, 0.02, sp.z);
     this.waterMeshes.push(smallPond);
     this.group.add(smallPond);
+    this.waterZones.push({ x: sp.x, z: sp.z, radius: 2.5 * this.spread / 3.5 });
 
     const lotusMat = new THREE.MeshStandardMaterial({ color: '#2e7d32', roughness: 0.8, metalness: 0, side: THREE.DoubleSide });
     for (let i = 0; i < 20; i++) {
@@ -448,6 +473,38 @@ export class Park {
     }
   }
 
+  private _scatterWaterHazards(bounds: ParkBounds): void {
+    const waterMat = new THREE.MeshStandardMaterial({
+      color: '#4fc3f7', roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.6,
+    });
+    const count = Math.floor(6 * bounds.halfWidth / 120);
+    for (let i = 0; i < count; i++) {
+      let attempts = 0;
+      while (attempts < 20) {
+        const x = (Math.random() - 0.5) * bounds.halfWidth * 1.6;
+        const z = (Math.random() - 0.5) * bounds.halfDepth * 1.6;
+        // Don't place near center spawn
+        if (Math.abs(x) < 8 && Math.abs(z) < 8) { attempts++; continue; }
+        // Don't overlap with existing water zones
+        let overlap = false;
+        for (const wz of this.waterZones) {
+          const dx = wz.x - x;
+          const dz = wz.z - z;
+          if (Math.sqrt(dx * dx + dz * dz) < wz.radius + 3) { overlap = true; break; }
+        }
+        if (overlap) { attempts++; continue; }
+        const radius = 0.8 + Math.random() * 1.5;
+        const puddle = new THREE.Mesh(new THREE.CircleGeometry(radius, 12), waterMat);
+        puddle.rotation.x = -Math.PI / 2;
+        puddle.position.set(x, 0.02, z);
+        this.waterMeshes.push(puddle);
+        this.group.add(puddle);
+        this.waterZones.push({ x, z, radius });
+        break;
+      }
+    }
+  }
+
   private _placeExtraLanterns(bounds: ParkBounds): void {
     const count = Math.floor(10 * bounds.halfWidth / 120);
     for (let i = 0; i < count; i++) {
@@ -456,6 +513,103 @@ export class Park {
       const lantern = new StoneLantern(new THREE.Vector3(x, 0, z), 0.6 + Math.random() * 0.4);
       this.lanterns.push(lantern);
       this.group.add(lantern.group);
+    }
+  }
+
+  isInWater(position: THREE.Vector3): boolean {
+    for (const wz of this.waterZones) {
+      const dx = wz.x - position.x;
+      const dz = wz.z - position.z;
+      if (Math.sqrt(dx * dx + dz * dz) < wz.radius) return true;
+    }
+    return false;
+  }
+
+  collectCoin(position: THREE.Vector3, range: number = 0.5): number {
+    for (const c of this.coins) {
+      if (c.collected) continue;
+      const dx = c.x - position.x;
+      const dz = c.z - position.z;
+      if (Math.sqrt(dx * dx + dz * dz) < range) {
+        c.collected = true;
+        if (c.mesh) c.mesh.visible = false;
+        if (c.glow) c.glow.visible = false;
+        return 1;
+      }
+    }
+    return 0;
+  }
+
+  isBenchNear(position: THREE.Vector3): boolean {
+    return this.pushableBench.isPlayerNear(position);
+  }
+
+  activateBench(): boolean {
+    if (this.pushableBench.pushed || this.pushableBench.animating) return false;
+    this.pushableBench.activate();
+    return true;
+  }
+
+  isSecretRevealed(): boolean {
+    return this.pushableBench.pushed;
+  }
+
+  private _setupBench(_bounds: ParkBounds): void {
+    const pos = this.zx(14, 0);
+    const bench = new PushableBench(pos.x, pos.z);
+    this.group.add(bench.group);
+    const hedgeMat = new THREE.MeshStandardMaterial({
+      color: '#2e7d32', roughness: 0.9, metalness: 0, side: THREE.DoubleSide, transparent: true, opacity: 1,
+    });
+    const hedge = new THREE.Mesh(new THREE.PlaneGeometry(2.5, 1.8), hedgeMat);
+    hedge.position.set(pos.x, 0.9, pos.z + 1.5);
+    hedge.rotation.y = Math.PI / 2;
+    hedge.castShadow = true;
+    hedge.receiveShadow = true;
+    this.group.add(hedge);
+    Object.assign(this, { pushableBench: bench, secretHedge: hedge });
+  }
+
+  private _scatterCoins(bounds: ParkBounds): void {
+    const count = Math.floor(20 * bounds.halfWidth / 120);
+    for (let i = 0; i < count; i++) {
+      let attempts = 0;
+      while (attempts < 30) {
+        const x = (Math.random() - 0.5) * bounds.halfWidth * 1.6;
+        const z = (Math.random() - 0.5) * bounds.halfDepth * 1.6;
+        if (Math.abs(x) < 3 && Math.abs(z) < 3) { attempts++; continue; }
+        let overlap = false;
+        for (const wz of this.waterZones) {
+          const dx = wz.x - x;
+          const dz = wz.z - z;
+          if (Math.sqrt(dx * dx + dz * dz) < wz.radius + 0.5) { overlap = true; break; }
+        }
+        if (overlap) { attempts++; continue; }
+        const coinMat = new THREE.MeshStandardMaterial({
+          color: '#ffd700', roughness: 0.2, metalness: 0.8, emissive: '#ffd700', emissiveIntensity: 0.3,
+        });
+        const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.03, 12), coinMat);
+        coin.rotation.x = Math.random() * Math.PI * 2;
+        coin.position.set(x, 0.03, z);
+        coin.receiveShadow = true;
+        this.group.add(coin);
+        const glowCanvas = document.createElement('canvas');
+        glowCanvas.width = 32;
+        glowCanvas.height = 32;
+        const ctx = glowCanvas.getContext('2d')!;
+        const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        grad.addColorStop(0, 'rgba(255, 215, 0, 0.4)');
+        grad.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 32, 32);
+        const glowTex = new THREE.CanvasTexture(glowCanvas);
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        glow.scale.set(0.6, 0.6, 1);
+        glow.position.set(x, 0.03, z);
+        this.group.add(glow);
+        this.coins.push({ x, z, collected: false, mesh: coin, glow });
+        break;
+      }
     }
   }
 
@@ -516,6 +670,13 @@ export class Park {
         Math.sin(phase + 0.1) - Math.sin(phase),
         Math.cos(phase + 0.1) - Math.cos(phase),
       );
+    }
+
+    this.pushableBench.update(delta);
+    if (this.pushableBench.pushed && this.secretHedge.visible) {
+      const mat = this.secretHedge.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.max(0, mat.opacity - delta * 0.5);
+      if (mat.opacity <= 0) this.secretHedge.visible = false;
     }
   }
 

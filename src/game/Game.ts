@@ -14,6 +14,7 @@ import { Journal } from '../systems/Journal';
 import { Hud } from '../systems/Hud';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park, type MoneyTreeInfo } from '../environment/Park';
+import { SimonSays } from '../minigames/SimonSays';
 
 const BASE_BOUNDS: ArenaBounds = {
   halfWidth: 120,
@@ -36,9 +37,10 @@ const DEER_SPAWNS = [
   { x: -70, z: -5 }, { x: -80, z: 30 }, { x: -90, z: -60 },
 ];
 
-function generateObstacles(count: number): Array<{ x: number; z: number; rotation: number; width?: number }> {
-  const obstacles: Array<{ x: number; z: number; rotation: number; width?: number }> = [];
+function generateObstacles(count: number): Array<{ x: number; z: number; rotation: number; width?: number; type?: 'barrier' | 'fence' | 'wall' }> {
+  const obstacles: Array<{ x: number; z: number; rotation: number; width?: number; type?: 'barrier' | 'fence' | 'wall' }> = [];
   const minDist = 8;
+  const types: Array<'barrier' | 'fence' | 'wall'> = ['barrier', 'fence', 'wall', 'barrier', 'barrier'];
   for (let i = 0; i < count; i++) {
     let attempts = 0;
     while (attempts < 50) {
@@ -51,7 +53,8 @@ function generateObstacles(count: number): Array<{ x: number; z: number; rotatio
         if (Math.sqrt(dx * dx + dz * dz) < minDist) { tooClose = true; break; }
       }
       if (!tooClose) {
-        obstacles.push({ x, z, rotation: Math.random() * Math.PI, width: 0.6 + Math.random() * 0.8 });
+        const t = types[Math.floor(Math.random() * types.length)];
+        obstacles.push({ x, z, rotation: Math.random() * Math.PI, width: 0.6 + Math.random() * 0.8, type: t });
         break;
       }
       attempts++;
@@ -60,7 +63,25 @@ function generateObstacles(count: number): Array<{ x: number; z: number; rotatio
   return obstacles;
 }
 
-const OBSTACLES = generateObstacles(40);
+function generateAlcoveObstacles(): Array<{ x: number; z: number; rotation: number; width?: number; type?: 'barrier' | 'fence' | 'wall' }> {
+  const alcoves: Array<{ x: number; z: number; rotation: number; width?: number; type?: 'barrier' | 'fence' | 'wall' }> = [];
+  // Hidden alcove positions (U-shapes made of walls)
+  const alcoveCenters = [
+    { x: -70, z: -50 }, { x: 80, z: -40 }, { x: 60, z: 70 }, { x: -90, z: 60 },
+  ];
+  for (const c of alcoveCenters) {
+    const w = 4;
+    // Back wall
+    alcoves.push({ x: c.x, z: c.z - w / 2, rotation: 0, width: w, type: 'wall' });
+    // Left wall
+    alcoves.push({ x: c.x - w / 2, z: c.z, rotation: Math.PI / 2, width: w, type: 'wall' });
+    // Right wall
+    alcoves.push({ x: c.x + w / 2, z: c.z, rotation: Math.PI / 2, width: w, type: 'wall' });
+  }
+  return alcoves;
+}
+
+const OBSTACLES = [...generateObstacles(40), ...generateAlcoveObstacles()];
 
 const VENDOR_SPAWNS = [
   { x: 10, z: 0 }, { x: -30, z: -20 }, { x: 50, z: 25 }, { x: -60, z: 40 }, { x: 30, z: -45 },
@@ -166,6 +187,11 @@ export class Game {
   private moneyTreeShakeTimer = 0;
   private moneyTreeShakeGroup: THREE.Group | null = null;
   private shareUsedThisLevel = false;
+  private sharedBonusForNextLevel = false;
+  private waterCooldown = 0;
+  private wasInWater = false;
+  private readonly simonSays = new SimonSays();
+  private templeRepaired = false;
 
   private currentLevel = 1;
   private currentBounds: ArenaBounds = BASE_BOUNDS;
@@ -184,8 +210,7 @@ export class Game {
 
     const stick = this.getElement('#touch-stick');
     const knob = this.getElement('#touch-knob');
-    const dashButton = this.getElement('#dash-button');
-    this.input = new InputController(stick, knob, dashButton);
+    this.input = new InputController(stick, knob);
 
     this.debugTools = new DebugTools(this.tuning, () => {
       this.renderer.toneMappingExposure = this.tuning.exposure;
@@ -208,6 +233,17 @@ export class Game {
     this.hud.setLevel(this.currentLevel, this.levelConfig.deerToFeed);
     this.cameraRig.snapTo(this.player.group.position, this.input.getCameraYaw(), this.input.getCameraPitch());
     resizeRenderer(this.renderer, this.camera, this.tuning.maxDpr);
+
+    // Wire player callbacks for audio
+    this.player.onJump = () => this.audio.jump();
+    this.player.onDash = () => this.audio.dash();
+
+    // Show touch controls on touch-capable devices (mobile/tablet)
+    const touchControls = document.getElementById('touch-controls');
+    if (touchControls && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
+      touchControls.style.display = 'flex';
+    }
+
     this.publishDiagnostics();
     this.setupFeedInput();
     this.setupJournalInput();
@@ -233,11 +269,24 @@ export class Game {
   private setupLevelButtons(): void {
     const nextBtn = document.getElementById('next-level-button');
     if (nextBtn) {
-      nextBtn.addEventListener('click', () => this.nextLevel());
+      nextBtn.addEventListener('click', () => {
+        this.audio.uiClick();
+        this.nextLevel();
+      });
     }
     const restartBtn = document.getElementById('restart-button');
     if (restartBtn) {
-      restartBtn.addEventListener('click', () => this.restart());
+      restartBtn.addEventListener('click', () => {
+        this.audio.uiClick();
+        this.restart();
+      });
+    }
+    const shareBtn = document.getElementById('completion-share-button');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', () => {
+        this.audio.uiClick();
+        this.doCompletionShare();
+      });
     }
   }
 
@@ -247,7 +296,8 @@ export class Game {
     this.levelConfig = getLevelConfig(level);
     this.deerFed = 0;
     this.crackerCount = this.levelConfig.initialCrackers;
-    this.money = 0;
+    this.money = this.sharedBonusForNextLevel ? 100 : 0;
+    this.sharedBonusForNextLevel = false;
     this.levelComplete = false;
     this.feedCooldown = 0;
     this.obstacleNearby = false;
@@ -257,6 +307,9 @@ export class Game {
     this.shareUsedThisLevel = false;
     this.moneyTreeShakeTimer = 0;
     this.moneyTreeShakeGroup = null;
+    this.waterCooldown = 0;
+    this.wasInWater = false;
+    this.templeRepaired = false;
     this.elapsed = 0;
 
     this.audio.stopBGM();
@@ -302,6 +355,7 @@ export class Game {
     this.debugTools.dispose();
     this.particles.dispose();
     this.park.dispose();
+    this.simonSays.dispose();
     for (const deer of this.deerList) deer.dispose();
     this.player.dispose();
     this.renderer.dispose();
@@ -336,6 +390,23 @@ export class Game {
         }
       }
     }
+
+    // Water hazard detection
+    if (this.waterCooldown > 0) this.waterCooldown -= delta;
+    const inWater = this.park.isInWater(this.player.group.position);
+    if (inWater && !this.wasInWater && this.waterCooldown <= 0 && !this.levelComplete) {
+      this.crackerCount--;
+      this.waterCooldown = 3;
+      this.audio.splash();
+      this.hud.showToast('掉水里了！-1 仙贝 💧');
+      // Push player back
+      const pushDir = new THREE.Vector3().copy(this.player.group.position).negate();
+      pushDir.y = 0;
+      if (pushDir.lengthSq() > 0.01) pushDir.normalize().multiplyScalar(2);
+      else pushDir.set(1, 0, 0);
+      this.player.group.position.add(pushDir);
+    }
+    this.wasInWater = inWater;
 
     this.obstacleNearby = false;
     const px = this.player.group.position.x;
@@ -407,10 +478,17 @@ export class Game {
         const money = chest.collect();
         if (money > 0) {
           this.money += money;
-          this.audio.feed();
+          this.audio.chestOpen();
           this.particles.emitPickup(chest.group.position.clone());
         }
       }
+    }
+
+    const coinMoney = this.park.collectCoin(this.player.group.position, 0.5);
+    if (coinMoney > 0) {
+      this.money += coinMoney;
+      this.audio.coin();
+      this.hud.showToast('拾到 1 円！💰');
     }
 
     this.cameraRig.update(delta, this.player.group.position, this.tuning.cameraLag, this.input.getCameraYaw(), this.input.getCameraPitch());
@@ -435,6 +513,7 @@ export class Game {
     if (this.deerFed >= this.levelConfig.deerToFeed && !this.levelComplete) {
       this.levelComplete = true;
       this.audio.victory();
+      this.audio.levelUp();
       this.particles.emitConfetti(this.player.group.position.clone().add(new THREE.Vector3(0, 2, 0)));
     }
 
@@ -443,6 +522,31 @@ export class Game {
 
   private tryFeed(): void {
     if (this.feedCooldown > 0 || this.levelComplete) return;
+
+    // Temple repair mini-game
+    if (!this.templeRepaired && this.park.temples.length > 0 && !this.simonSays.isActive) {
+      const templePos = this.park.temples[0].group.position;
+      if (templePos.distanceTo(this.player.group.position) < 2.0) {
+        this.simonSays.start(() => {
+          this.templeRepaired = true;
+          this.money += 50;
+          this.audio.feed();
+          this.hud.showToast('神社修复完成！获得 50 円 🎉');
+        });
+        this.feedCooldown = 0.5;
+        return;
+      }
+    }
+
+    // Bench puzzle activation
+    if (this.park.isBenchNear(this.player.group.position)) {
+      if (this.park.activateBench()) {
+        this.audio.feed();
+        this.hud.showToast('长椅被推开了！露出了秘密通道 🪤');
+        this.feedCooldown = 0.5;
+      }
+      return;
+    }
 
     // Money tree collection
     if (this.nearestMoneyTree && !this.nearestMoneyTree.collected) {
@@ -489,37 +593,38 @@ export class Game {
     const url = window.location.href;
     const text = '来奈良公园喂鹿吧！我正在挑战第 ' + this.currentLevel + ' 关！\n' + url;
 
-    const shareSuccess = () => {
-      this.rewardShare();
-      this.hud.showToast('分享成功！获得 100 円 🎉');
-    };
-
-    // 立即反馈
-    this.hud.showToast('正在准备分享…');
-
-    // 优先 Web Share API（手机原生分享面板）
-    if (navigator.share) {
+    // 手机端优先 Web Share API（原生分享面板，体验最好）
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      this.hud.showToast('正在准备分享…');
       navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url })
-        .then(shareSuccess)
+        .then(() => {
+          this.rewardShare();
+          this.hud.showToast('分享成功！获得 100 円 🎉');
+        })
         .catch(() => {
-          this.tryClipboardShare(text, shareSuccess);
+          this.doClipboardShare(text);
         });
-    } else {
-      this.tryClipboardShare(text, shareSuccess);
+      return;
     }
+
+    // 桌面端直接复制链接
+    this.doClipboardShare(text);
   }
 
-  private tryClipboardShare(text: string, onSuccess: () => void): void {
+  private doClipboardShare(text: string): void {
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
-        this.fallbackShare(text, onSuccess);
+      navigator.clipboard.writeText(text).then(() => {
+        this.rewardShare();
+        this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
+      }).catch(() => {
+        this.fallbackShare(text);
       });
     } else {
-      this.fallbackShare(text, onSuccess);
+      this.fallbackShare(text);
     }
   }
 
-  private fallbackShare(text: string, onSuccess: () => void): void {
+  private fallbackShare(text: string): void {
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.style.position = 'fixed';
@@ -528,11 +633,47 @@ export class Game {
     textarea.select();
     try {
       document.execCommand('copy');
-      onSuccess();
+      this.rewardShare();
+      this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
     } catch {
-      this.hud.showToast('复制链接失败，请手动分享此页面 🙏');
+      this.hud.showToast('复制失败，请手动分享此页面 🙏');
     }
     document.body.removeChild(textarea);
+  }
+
+  doCompletionShare(): void {
+    if (this.shareUsedThisLevel) return;
+    const url = window.location.href;
+    const text = '我刚在奈良公园完成第 ' + this.currentLevel + ' 关！来挑战吧！\n' + url;
+
+    const onSuccess = () => {
+      this.shareUsedThisLevel = true;
+      this.sharedBonusForNextLevel = true;
+      this.audio.feed();
+      this.hud.showToast('分享成功！下一关开始自动获得 100 円 🎉');
+    };
+
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      this.hud.showToast('正在准备分享…');
+      navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url })
+        .then(onSuccess)
+        .catch(() => {
+          this.doCompletionClipboardShare(text, onSuccess);
+        });
+      return;
+    }
+
+    this.doCompletionClipboardShare(text, onSuccess);
+  }
+
+  private doCompletionClipboardShare(text: string, onSuccess: () => void): void {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
+        this.fallbackShare(text);
+      });
+    } else {
+      this.fallbackShare(text);
+    }
   }
 
   private rewardShare(): void {
@@ -545,6 +686,10 @@ export class Game {
 
   private setupFeedInput(): void {
     window.addEventListener('keydown', (e) => {
+      if (this.simonSays.isActive) {
+        this.simonSays.handleKeyDown(e.code);
+        return;
+      }
       if (e.code === 'KeyE') {
         this.feedKeyPressed.add('keyboard');
         this.tryFeed();
@@ -569,13 +714,23 @@ export class Game {
       feedBtn.addEventListener('pointerleave', () => {
         this.feedKeyPressed.delete('mobile');
       });
+      feedBtn.addEventListener('touchstart', () => {
+        this.feedKeyPressed.add('mobile');
+        this.tryFeed();
+      }, { passive: true });
+      feedBtn.addEventListener('touchend', () => {
+        this.feedKeyPressed.delete('mobile');
+      }, { passive: true });
     }
   }
 
   private setupShareButton(): void {
     const btn = document.getElementById('share-button');
     if (btn) {
-      btn.addEventListener('click', () => this.doShare());
+      btn.addEventListener('click', () => {
+        this.audio.uiClick();
+        this.doShare();
+      });
     }
   }
 

@@ -16,6 +16,11 @@ export class Player {
   readonly group = new THREE.Group();
   readonly velocity = new THREE.Vector3();
 
+  /** Callback triggered on jump */
+  onJump: (() => void) | null = null;
+  /** Callback triggered on dash */
+  onDash: (() => void) | null = null;
+
   private readonly move = new THREE.Vector2();
   private readonly targetVelocity = new THREE.Vector3();
   private readonly bodyGroup = new THREE.Group();
@@ -70,6 +75,8 @@ export class Player {
   private onGround = true;
   private readonly jumpVelocity = 2.8;
   private readonly gravity = -14;
+
+  private previouslyDashing = false;
 
   constructor() {
     // Body (torso)
@@ -221,6 +228,12 @@ export class Player {
   update(delta: number, _elapsed: number, input: InputController, tuning: PlayerTuning, bounds: ArenaBounds, cameraYaw: number): void {
     input.readMovement(this.move);
     const dash = input.isDashHeld() ? tuning.dashMultiplier : 1;
+    if (input.isDashHeld() && !this.previouslyDashing) {
+      this.previouslyDashing = true;
+      this.onDash?.();
+    } else if (!input.isDashHeld()) {
+      this.previouslyDashing = false;
+    }
 
     // Rotate movement input relative to camera yaw
     // forward = (-sinθ, -cosθ), right = (cosθ, -sinθ)
@@ -240,6 +253,7 @@ export class Player {
     if (input.consumeJump() && this.onGround) {
       this.verticalVelocity = this.jumpVelocity;
       this.onGround = false;
+      this.onJump?.();
     }
 
     // Gravity
