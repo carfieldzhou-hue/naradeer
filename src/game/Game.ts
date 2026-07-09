@@ -7,7 +7,7 @@ import { Deer, DeerPersonality } from '../entities/Deer';
 import { Obstacle } from '../entities/Obstacle';
 import { Vendor } from '../entities/Vendor';
 import { TreasureChest } from '../entities/TreasureChest';
-import { AudioSystem } from '../systems/AudioSystem';
+import { AudioSystem, type ReverbZone } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
 import { DebugTools, type DebugTuning } from '../systems/DebugTools';
 import { Journal } from '../systems/Journal';
@@ -22,11 +22,22 @@ const BASE_BOUNDS: ArenaBounds = {
 };
 
 function getBoundsForLevel(level: number): ArenaBounds {
-  const scale = Math.pow(2, level - 1);
+  // Level 1 is half the original size (easier + faster to load); each
+  // later level doubles, ramping difficulty back up. The map stops growing at
+  // level 7 so it never becomes unwieldy to traverse (capped scale).
+  const effective = Math.min(level, 7);
+  const scale = 0.5 * Math.pow(2, effective - 1);
   return {
     halfWidth: Math.round(BASE_BOUNDS.halfWidth * scale),
     halfDepth: Math.round(BASE_BOUNDS.halfDepth * scale),
   };
+}
+
+// How much smaller/larger the current arena is vs the design-space bounds.
+// All fixed-coordinate content (deer, chests, obstacles) is authored in the
+// BASE_BOUNDS space, so we multiply by this factor to keep it inside the arena.
+function contentScaleFor(b: ArenaBounds): number {
+  return b.halfWidth / BASE_BOUNDS.halfWidth;
 }
 
 const DEER_SPAWNS = [
@@ -83,9 +94,8 @@ function generateAlcoveObstacles(): Array<{ x: number; z: number; rotation: numb
 
 const OBSTACLES = [...generateObstacles(40), ...generateAlcoveObstacles()];
 
-const VENDOR_SPAWNS = [
-  { x: 10, z: 0 }, { x: -30, z: -20 }, { x: 50, z: 25 }, { x: -60, z: 40 }, { x: 30, z: -45 },
-];
+// Vendor stalls are now spawned procedurally per level (see createVendorsForLevel),
+// so no fixed spawn list is needed.
 
 function generateChestSpawns(count: number): Array<{ x: number; z: number }> {
   const chests: Array<{ x: number; z: number }> = [];
@@ -120,7 +130,9 @@ export interface LevelConfig {
 
 function getLevelConfig(level: number): LevelConfig {
   const deerToFeed = Math.min(16, 5 + (level - 1) * 2);
-  const moneyPool = Math.max(10, Math.floor(1000 / Math.pow(2, level - 1)));
+  // Gentle exponential decay so the money edge doesn't crater: L1≈1000, L2≈600,
+  // L3≈360 … floored at 50 so chests never pay out nothing.
+  const moneyPool = Math.max(50, Math.floor(1000 * Math.pow(0.6, level - 1)));
   return { level, deerToFeed, moneyPool, initialCrackers: 3, crackerPrice: 100 };
 }
 
@@ -142,6 +154,27 @@ function distributeMoney(pool: number, count: number): number[] {
   return values;
 }
 
+export interface ShopItemDef {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+  cost: number;
+  unlockLevel: number;
+  once?: boolean; // one-time purchase that lasts the whole level (e.g. bike)
+}
+
+/** Consumable items = the economy's spending outlets. Each is unlocked at a
+ *  specific level so new tools appear progressively, not all at once. */
+const SHOP_ITEMS: ShopItemDef[] = [
+  { id: 'whistle',   name: '鹿笛',       icon: '🎵', desc: '召唤附近 3 只未喂鹿靠近你',     cost: 150, unlockLevel: 2 },
+  { id: 'radar',     name: '寻鹿雷达',   icon: '📡', desc: '30 秒内箭头指向最近未喂鹿',     cost: 120, unlockLevel: 2 },
+  { id: 'speed',     name: '速度符',     icon: '💨', desc: '20 秒内移速 ×1.8',             cost: 200, unlockLevel: 3 },
+  { id: 'waterward', name: '避水符',     icon: '☂️', desc: '60 秒内免疫水池惩罚',          cost: 180, unlockLevel: 3 },
+  { id: 'stealth',   name: '隐身斗篷',   icon: '👘', desc: '15 秒内稀有 / 传说鹿不逃跑',   cost: 300, unlockLevel: 5 },
+  { id: 'bike',      name: '环保自行车', icon: '🚲', desc: '本关移速 ×2.5（整关生效）',    cost: 500, unlockLevel: 7, once: true },
+];
+
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -152,6 +185,8 @@ export class Game {
   private readonly audio = new AudioSystem();
   private readonly hud = new Hud();
   private readonly cameraRig = new CameraRig(this.camera);
+  private readonly _audioCamPos = new THREE.Vector3();
+  private readonly _audioCamFwd = new THREE.Vector3();
   private readonly particles: ParticleSystem;
   private readonly park: Park;
   private readonly loop = new Loop(
@@ -179,19 +214,28 @@ export class Game {
   private money = 0;
   private obstacleNearby = false;
   private feedCooldown = 0;
-  private readonly feedKeyPressed = new Set<string>();
   private nearestDeer: Deer | null = null;
   private nearestVendor: Vendor | null = null;
   private nearestMoneyTree: MoneyTreeInfo | null = null;
   private readonly moneyTrees: (MoneyTreeInfo & { collected: boolean })[] = [];
   private moneyTreeShakeTimer = 0;
   private moneyTreeShakeGroup: THREE.Group | null = null;
-  private shareUsedThisLevel = false;
+  private shareCooldown = 0;           // seconds; anti-spam gate between shares
+  private totalShares = 0;             // lifetime shares (meta progression / titles)
+  private currentTitle = '';            // last unlocked title (change detection)
   private sharedBonusForNextLevel = false;
   private waterCooldown = 0;
   private wasInWater = false;
   private readonly simonSays = new SimonSays();
   private templeRepaired = false;
+
+  // Consumable item effect timers (seconds remaining). bikeActive is a
+  // whole-level flag (one-time purchase). These are the economy's outlets.
+  private radarTimer = 0;
+  private speedBoostTimer = 0;
+  private waterWardTimer = 0;
+  private stealthTimer = 0;
+  private bikeActive = false;
 
   private currentLevel = 1;
   private currentBounds: ArenaBounds = BASE_BOUNDS;
@@ -211,6 +255,8 @@ export class Game {
     const stick = this.getElement('#touch-stick');
     const knob = this.getElement('#touch-knob');
     this.input = new InputController(stick, knob);
+    // Feed is now a centre-tap on the joystick (one-thumb operation).
+    this.input.setFeedCallback(() => this.tryFeed());
 
     this.debugTools = new DebugTools(this.tuning, () => {
       this.renderer.toneMappingExposure = this.tuning.exposure;
@@ -230,12 +276,16 @@ export class Game {
 
     this.journal = new Journal(this.deerList.map((d) => d.getDeerInfo()));
 
+    // Restore lifetime share count + title (meta progression, persisted locally).
+    this.totalShares = this.loadTotalShares();
+    this.currentTitle = this.computeTitle(this.totalShares).name;
+    this.journal.setTitle(this.currentTitle);
+
     this.hud.setLevel(this.currentLevel, this.levelConfig.deerToFeed);
     this.cameraRig.snapTo(this.player.group.position, this.input.getCameraYaw(), this.input.getCameraPitch());
     resizeRenderer(this.renderer, this.camera, this.tuning.maxDpr);
 
     // Wire player callbacks for audio
-    this.player.onJump = () => this.audio.jump();
     this.player.onDash = () => this.audio.dash();
 
     // Show touch controls on touch-capable devices (mobile/tablet)
@@ -247,13 +297,24 @@ export class Game {
     this.publishDiagnostics();
     this.setupFeedInput();
     this.setupJournalInput();
+    this.setupJournalShare();
     this.setupLevelButtons();
     this.setupShareButton();
+    this.setupShop();
+    // Reveal the shop button now that the game (and its handlers) are ready.
+    const shopBtn = document.getElementById('shop-button');
+    if (shopBtn) shopBtn.style.display = 'block';
   }
 
   start(): void {
     this.audio.startBGM(this.currentLevel);
     this.loop.start();
+  }
+
+  /** Open/close the deer codex journal. Exposed so main.ts (and other
+   *  entry points) can toggle it without reaching into private fields. */
+  toggleJournal(): void {
+    this.journal.toggle();
   }
 
   restart(): void {
@@ -295,8 +356,15 @@ export class Game {
     this.currentBounds = getBoundsForLevel(level);
     this.levelConfig = getLevelConfig(level);
     this.deerFed = 0;
-    this.crackerCount = this.levelConfig.initialCrackers;
-    this.money = this.sharedBonusForNextLevel ? 100 : 0;
+    this.crackerCount = this.levelConfig.initialCrackers; // crackers reset each level (don't carry)
+    // Money carries across levels to reduce difficulty; only a fresh restart
+    // back to level 1 zeroes it. The completion-share bonus is folded into
+    // the carry (added when entering the next level).
+    if (level === 1) {
+      this.money = 0;
+    } else {
+      this.money += this.sharedBonusForNextLevel ? 100 : 0;
+    }
     this.sharedBonusForNextLevel = false;
     this.levelComplete = false;
     this.feedCooldown = 0;
@@ -304,12 +372,19 @@ export class Game {
     this.nearestDeer = null;
     this.nearestVendor = null;
     this.nearestMoneyTree = null;
-    this.shareUsedThisLevel = false;
+    this.shareCooldown = 0;
     this.moneyTreeShakeTimer = 0;
     this.moneyTreeShakeGroup = null;
     this.waterCooldown = 0;
     this.wasInWater = false;
     this.templeRepaired = false;
+    // Reset consumable item effects each level (bike is per-level too).
+    this.radarTimer = 0;
+    this.speedBoostTimer = 0;
+    this.waterWardTimer = 0;
+    this.stealthTimer = 0;
+    this.bikeActive = false;
+    this.hud.setRadar(null);
     this.elapsed = 0;
 
     this.audio.stopBGM();
@@ -318,8 +393,9 @@ export class Game {
     this.player.group.position.set(0, 0, 0);
     this.player.velocity.set(0, 0, 0);
 
-    // Regenerate park scenery with new bounds
-    this.park.regenerate(this.currentBounds);
+    // Regenerate park scenery with new bounds (and pass the level so
+    // water hazards/pond only appear from level 2 on).
+    this.park.regenerate(this.currentBounds, level);
 
     // Update shadow camera for new bounds
     const sun = this.scene.children.find(c => c instanceof THREE.DirectionalLight && c.castShadow) as THREE.DirectionalLight | undefined;
@@ -345,7 +421,15 @@ export class Game {
 
     this.hud.setLevel(level, this.levelConfig.deerToFeed);
     this.hud.hideCompletion();
+    // Re-show the shop button for the new level.
+    const sb = document.getElementById('shop-button');
+    if (sb) sb.style.display = 'block';
     this.cameraRig.snapTo(this.player.group.position, this.input.getCameraYaw(), this.input.getCameraPitch());
+
+    // Pre-level hint: warn about water hazards (they appear from level 2 on).
+    if (level >= 2) {
+      this.hud.showToast('⚠️ 本关有水池！碰到会惊跑小鹿，绕开走更安全～', 4500);
+    }
   }
 
   dispose(): void {
@@ -369,11 +453,23 @@ export class Game {
     resizeRenderer(this.renderer, this.camera, this.tuning.maxDpr);
 
     if (this.feedCooldown > 0) this.feedCooldown -= delta;
+    if (this.shareCooldown > 0) this.shareCooldown -= delta;
+
+    // Consumable item timers
+    if (this.radarTimer > 0) this.radarTimer -= delta;
+    if (this.speedBoostTimer > 0) this.speedBoostTimer -= delta;
+    if (this.waterWardTimer > 0) this.waterWardTimer -= delta;
+    if (this.stealthTimer > 0) this.stealthTimer -= delta;
+
+    // Speed boost: eco bike (whole level) takes priority over the charm,
+    // otherwise the 20s charm applies; both multiply the base walk speed.
+    this.player.boostMultiplier = this.bikeActive ? 2.5 : (this.speedBoostTimer > 0 ? 1.8 : 1);
 
     this.player.update(delta, elapsed, this.input, this.tuning, this.currentBounds, this.input.getCameraYaw());
 
+    const stealthed = this.stealthTimer > 0;
     for (const deer of this.deerList) {
-      deer.update(delta, this.player.group.position, this.crackerCount > 0);
+      deer.update(delta, this.player.group.position, stealthed);
     }
 
     const playerPos = this.player.group.position;
@@ -394,10 +490,10 @@ export class Game {
     // Water hazard detection
     if (this.waterCooldown > 0) this.waterCooldown -= delta;
     const inWater = this.park.isInWater(this.player.group.position);
-    if (inWater && !this.wasInWater && this.waterCooldown <= 0 && !this.levelComplete) {
+    if (inWater && !this.wasInWater && this.waterCooldown <= 0 && !this.levelComplete && this.waterWardTimer <= 0) {
       this.crackerCount--;
       this.waterCooldown = 3;
-      this.audio.splash();
+      this.audio.splash(this.player.group.position);
       this.hud.showToast('掉水里了！-1 仙贝 💧');
       // Push player back
       const pushDir = new THREE.Vector3().copy(this.player.group.position).negate();
@@ -478,7 +574,7 @@ export class Game {
         const money = chest.collect();
         if (money > 0) {
           this.money += money;
-          this.audio.chestOpen();
+          this.audio.chestOpen(chest.group.position);
           this.particles.emitPickup(chest.group.position.clone());
         }
       }
@@ -487,13 +583,66 @@ export class Game {
     const coinMoney = this.park.collectCoin(this.player.group.position, 0.5);
     if (coinMoney > 0) {
       this.money += coinMoney;
-      this.audio.coin();
+      this.audio.coin(this.player.group.position);
       this.hud.showToast('拾到 1 円！💰');
+    }
+
+    // Deer radar: point an arrow at the nearest unfed deer (camera-relative).
+    if (this.radarTimer > 0) {
+      const target = this.findNearestUnfedDeer();
+      if (target) {
+        const yaw = this.input.getCameraYaw();
+        const wx = target.group.position.x - this.player.group.position.x;
+        const wz = target.group.position.z - this.player.group.position.z;
+        const sin = Math.sin(yaw);
+        const cos = Math.cos(yaw);
+        const forwardComp = -wx * sin - wz * cos;
+        const rightComp = wx * cos - wz * sin;
+        this.hud.setRadar(Math.atan2(rightComp, forwardComp) * 180 / Math.PI);
+      } else {
+        this.hud.setRadar(null);
+      }
+    } else {
+      this.hud.setRadar(null);
     }
 
     this.cameraRig.update(delta, this.player.group.position, this.tuning.cameraLag, this.input.getCameraYaw(), this.input.getCameraPitch());
     this.particles.update(delta);
     this.park.update(delta);
+
+    // ---- 自适应音频：听者 / 张力 / 混响分区 / 相位 ----
+    this.camera.getWorldPosition(this._audioCamPos);
+    this.camera.getWorldDirection(this._audioCamFwd);
+    this.audio.setListener(this._audioCamPos, this._audioCamFwd);
+
+    let tension = 0;
+    for (const deer of this.deerList) {
+      if (deer.aggressiveState === 'charging') {
+        const d = deer.group.position.distanceTo(playerPos);
+        tension = Math.max(tension, 0.6 * Math.max(0, 1 - d / 12));
+      }
+    }
+    if (this.money < 100) tension = Math.max(tension, 0.12);
+    this.audio.setTension(tension);
+
+    let zone: ReverbZone = 'outdoor';
+    if (this.park.temples.length > 0 &&
+        this.park.temples[0].group.position.distanceTo(playerPos) < 14) {
+      zone = 'temple';
+    }
+    this.audio.setReverbZone(zone);
+
+    let social = false;
+    for (const deer of this.deerList) {
+      if (deer.group.position.distanceTo(playerPos) >= 6) continue;
+      const s = deer.state.current;
+      if (s === 'bow' || s === 'eating' || s === 'happy' || s === 'approach') {
+        social = true;
+        break;
+      }
+    }
+    this.audio.setPhase(social ? 'social' : 'explore');
+
     this.hud.update(
       this.deerFed,
       this.levelConfig.deerToFeed,
@@ -507,7 +656,7 @@ export class Game {
       this.nearestVendor !== null,
       this.currentLevel,
       this.nearestMoneyTree !== null,
-      !this.shareUsedThisLevel,
+      this.shareCooldown <= 0,
     );
 
     if (this.deerFed >= this.levelConfig.deerToFeed && !this.levelComplete) {
@@ -515,6 +664,10 @@ export class Game {
       this.audio.victory();
       this.audio.levelUp();
       this.particles.emitConfetti(this.player.group.position.clone().add(new THREE.Vector3(0, 2, 0)));
+      // Hide the shop button + close any open shop while the completion card is up.
+      const sb = document.getElementById('shop-button');
+      if (sb) sb.style.display = 'none';
+      this.closeShop();
     }
 
     this.publishDiagnostics();
@@ -577,54 +730,80 @@ export class Game {
       return;
     }
 
-    if (this.nearestDeer && this.nearestDeer.canBeFed()) {
-      if (this.crackerCount > 0) {
-        this.doFeed(this.nearestDeer);
-      } else {
+    if (this.nearestDeer) {
+      // Already fed this level — give clear feedback instead of silently doing nothing.
+      if (this.nearestDeer.fed) {
         this.audio.error();
-        this.hud.showToast('没有仙贝了！先去小摊购买');
+        this.hud.showToast('小鹿已吃饱啦 🍃');
         this.feedCooldown = 0.5;
+        return;
+      }
+      if (this.nearestDeer.canBeFed()) {
+        if (this.crackerCount > 0) {
+          this.doFeed(this.nearestDeer);
+        } else {
+          this.audio.error();
+          this.hud.showToast('没有仙贝了！先去小摊购买');
+          this.feedCooldown = 0.5;
+        }
+        return;
       }
     }
   }
 
   doShare(): void {
     if (this.levelComplete) {
-      this.hud.showToast('请在关卡未完成时分享哦 🦌');
+      this.hud.showToast('关卡已完成啦，用通关分享按钮吧 🦌');
       return;
     }
-    if (this.shareUsedThisLevel) {
-      this.hud.showToast('本关已分享过啦，等下一关再试～');
+    if (this.shareCooldown > 0) {
+      this.hud.showToast(`分享冷却中…（${Math.ceil(this.shareCooldown)}s）`, 1200);
       return;
     }
     const url = window.location.href;
-    const text = '来奈良公园喂鹿吧！我正在挑战第 ' + this.currentLevel + ' 关！\n' + url;
+    const text = this.buildShareText(false);
 
-    // 1) Try the Web Share API (works in mobile Safari, modern Chrome, and
-    //    in-app browsers that surface it — but NOT in WeChat's X5/QQ browser
-    //    where `navigator.share` may exist yet be a no-op).
+    // 1) Web Share API — native share sheet in mobile Safari/Chrome AND desktop
+    //    Chrome/Edge (over localhost/HTTPS). This IS the primary "分享按钮":
+    //    tapping share pops the OS share sheet directly.
     if (this.canUseWebShare()) {
-      this.hud.showToast('正在准备分享…');
-      // Use a generous timeout — some Android browsers pop the sheet slowly.
-      const sharePromise = navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url });
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('share-timeout')), 4000),
-      );
-      Promise.race([sharePromise, timeout])
-        .then(() => {
-          this.rewardShare();
-          this.hud.showToast('分享成功！获得 100 円 🎉');
-        })
-        .catch(() => {
-          // User cancelled OR the API was a no-op (e.g. WeChat X5) — fall back
-          // to the in-app guide that points to the browser's share menu.
-          this.showShareGuide(text);
-        });
+      this.tryWebShare(text, url, () => this.onShareSuccess(false));
       return;
     }
 
-    // 2) Desktop / no Web Share API — copy link to clipboard and reward.
-    this.doClipboardShare(text);
+    // 2) No native Web Share (desktop Firefox/Safari, or WeChat/QQ in-app) —
+    //    pop a share panel with explicit buttons so the player always gets a
+    //    clear, tappable share affordance. The goal is to maximise sharing.
+    this.openSharePanel(text, () => this.onShareSuccess(false));
+  }
+
+  /**
+   * Build the full share copy — a punchy, challenge-flavoured blurb that
+   * already embeds the game link, so every channel (native sheet, clipboard
+   * copy, WeChat pre-fill) carries the whole pitch, not just a bare URL.
+   * `isCompletion` swaps in a "I beat level N" hook.
+   */
+  private buildShareText(isCompletion: boolean): string {
+    const url = window.location.href;
+    const fed = this.deerFed;
+    const target = this.levelConfig.deerToFeed;
+    const collected = this.journal.getCollectedCount();
+    const title = this.currentTitle;
+    if (isCompletion) {
+      return [
+        `🦌 我在《奈良公园·喂鹿》通关第 ${this.currentLevel} 关啦！`,
+        `本关喂饱 ${fed}/${target} 只小鹿，图鉴已集齐 ${collected} 种，称号「${title}」`,
+        `你能喂多少只？敢来挑战收集全图鉴吗？👇`,
+        url,
+      ].join('\n');
+    }
+    return [
+      `🦌《奈良公园·喂鹿》– 治愈系收集挑战！`,
+      `我正在第 ${this.currentLevel} 关，已喂饱 ${fed}/${target} 只小鹿，`,
+      `图鉴集齐 ${collected} 种，称号「${title}」`,
+      `稀有鹿和传说鹿超难靠近，看你能否集齐全部！来一起喂鹿 👇`,
+      url,
+    ].join('\n');
   }
 
   /**
@@ -638,12 +817,84 @@ export class Game {
     const share = (navigator as Navigator & { share?: unknown }).share;
     if (typeof share !== 'function') return false;
     const ua = navigator.userAgent || '';
-    const isMobile = /Mobi|Android|iPhone|iPad/i.test(ua);
-    if (!isMobile) return false;
-    // X5 / QQ browsers expose a stub navigator.share. Detect them by their
-    // own markers and bail out so we show the manual-share guide instead.
+    // WeChat / QQ in-app browsers expose a stub navigator.share that does
+    // nothing — a plain web page can't programmatically trigger their native
+    // share sheet, so we skip Web Share there and show the manual guide.
     if (/MicroMessenger|QQ\//.test(ua)) return false;
+    // Desktop Chrome/Edge and mobile Safari/Chrome all support navigator.share
+    // (over localhost/HTTPS), so we no longer gate on a mobile UA.
     return true;
+  }
+
+  /**
+   * Pop the native OS share sheet via the Web Share API. Must be called from a
+   * user gesture (the share button click). If the user cancels or the API is a
+   * no-op that never resolves, the 4s timeout races it and we fall back to
+   * copying the link to the clipboard.
+   */
+  private tryWebShare(text: string, url: string, onSuccess: () => void): void {
+    this.hud.showToast('正在准备分享…');
+    const sharePromise = navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url });
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('share-timeout')), 4000),
+    );
+    Promise.race([sharePromise, timeout])
+      .then(() => onSuccess())
+      .catch(() => {
+        // User cancelled OR the API was a no-op — fall back to clipboard copy.
+        this.doClipboardShare(text);
+      });
+  }
+
+  /**
+   * Fallback share UI for browsers without the Web Share API (desktop
+   * Firefox/Safari) and in-app browsers (WeChat/QQ). Pops a panel with explicit
+   * share buttons so the player always gets a visible, tappable "分享按钮" —
+   * maximising share rate, which is a core retention goal. The native sheet is
+   * used directly whenever available (see doShare / doCompletionShare).
+   */
+  private openSharePanel(text: string, onSuccess: () => void): void {
+    const existing = document.getElementById('share-panel');
+    if (existing) {
+      existing.classList.remove('hidden');
+      return;
+    }
+    const panel = document.createElement('div');
+    panel.id = 'share-panel';
+    panel.setAttribute('data-hide-on-hidden', '1');
+    panel.innerHTML = `
+      <div class="share-panel-backdrop"></div>
+      <div class="share-panel" role="dialog" aria-label="分享">
+        <h3>🦌 分享奈良公园</h3>
+        <p class="share-panel-sub">喊好友来挑战收集全图鉴！每次分享得 100 円</p>
+        <div class="share-panel-btns">
+          <button type="button" class="sp-btn sp-copy">📋 复制整段话术</button>
+          <button type="button" class="sp-btn sp-wechat">💬 微信分享</button>
+        </div>
+        <button type="button" class="sp-close">关闭</button>
+      </div>
+    `;
+    document.body.appendChild(panel);
+
+    const close = () => panel.classList.add('hidden');
+    panel.querySelector('.sp-close')?.addEventListener('click', close);
+    panel.querySelector('.share-panel-backdrop')?.addEventListener('click', close);
+
+    // 复制链接 → copy to clipboard, then fire the level-appropriate reward
+    // handler (in-level gives 100円 now; completion sets the next-level bonus).
+    panel.querySelector('.sp-copy')?.addEventListener('click', () => {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => onSuccess()).catch(() => this.fallbackShare(text));
+      } else {
+        this.fallbackShare(text);
+      }
+      close();
+    });
+    // 微信分享 → manual guide (a plain web page can't auto-open WeChat's sheet).
+    panel.querySelector('.sp-wechat')?.addEventListener('click', () => {
+      this.showShareGuide(text);
+      close();
+    });
   }
 
   /**
@@ -701,12 +952,10 @@ export class Game {
 
   private doClipboardShare(text: string): void {
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => {
-        this.rewardShare();
-        this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
-      }).catch(() => {
-        this.fallbackShare(text);
-      });
+      navigator.clipboard.writeText(text).then(() => this.onShareSuccess(false))
+        .catch(() => {
+          this.fallbackShare(text);
+        });
     } else {
       this.fallbackShare(text);
     }
@@ -730,8 +979,7 @@ export class Game {
     }
     document.body.removeChild(textarea);
     if (copied) {
-      this.rewardShare();
-      this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
+      this.onShareSuccess(false);
     } else {
       // Final fallback: show the text in a toast so the user can copy it manually.
       const short = text.length > 80 ? text.slice(0, 77) + '…' : text;
@@ -740,53 +988,78 @@ export class Game {
   }
 
   doCompletionShare(): void {
-    if (this.shareUsedThisLevel) return;
+    if (this.shareCooldown > 0) {
+      this.hud.showToast(`分享冷却中…（${Math.ceil(this.shareCooldown)}s）`, 1200);
+      return;
+    }
     const url = window.location.href;
-    const text = '我刚在奈良公园完成第 ' + this.currentLevel + ' 关！来挑战吧！\n' + url;
+    const text = this.buildShareText(true);
 
-    const onSuccess = () => {
-      this.shareUsedThisLevel = true;
-      this.sharedBonusForNextLevel = true;
-      this.audio.feed();
-      this.hud.showToast('分享成功！下一关开始自动获得 100 円 🎉');
-    };
-
+    // 1) Web Share API — same native sheet as doShare().
     if (this.canUseWebShare()) {
-      this.hud.showToast('正在准备分享…');
-      const sharePromise = navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url });
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('share-timeout')), 4000),
-      );
-      Promise.race([sharePromise, timeout])
-        .then(onSuccess)
-        .catch(() => {
-          // WeChat/X5 in-app browser — show the manual share guide but still
-          // reward the player for attempting the share.
-          this.showShareGuide(text);
-          onSuccess();
-        });
+      this.tryWebShare(text, url, () => this.onShareSuccess(true));
       return;
     }
 
-    this.doCompletionClipboardShare(text, onSuccess);
+    // 2) No native Web Share — pop the share panel with explicit buttons.
+    this.openSharePanel(text, () => this.onShareSuccess(true));
   }
 
-  private doCompletionClipboardShare(text: string, onSuccess: () => void): void {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(onSuccess).catch(() => {
-        this.fallbackShare(text);
-      });
+  /**
+   * Fired on EVERY successful share (in-level or completion). Each share yields
+   * 100 円 and counts toward the lifetime share total that unlocks titles.
+   * A short cooldown prevents spam-clicking the button for infinite money.
+   */
+  private onShareSuccess(isCompletion: boolean): void {
+    this.money += 100;
+    this.totalShares += 1;
+    this.saveTotalShares();
+    if (isCompletion) {
+      this.sharedBonusForNextLevel = true; // also fold a bonus into next level
+    }
+    const newTitle = this.computeTitle(this.totalShares);
+    this.journal.setTitle(newTitle.name);
+    if (newTitle.name !== this.currentTitle) {
+      this.currentTitle = newTitle.name;
+      this.hud.showToast(`🏆 解锁新称号：${newTitle.name}！${newTitle.desc}`, 4000);
     } else {
-      this.fallbackShare(text);
+      this.hud.showToast(`分享成功！+100 円 🎉（累计分享 ${this.totalShares} 次）`);
+    }
+    this.shareCooldown = 4; // anti-spam cooldown (seconds)
+  }
+
+  private static readonly SHARE_TITLES: Array<{ min: number; name: string; desc: string }> = [
+    { min: 0, name: '新手饲鹿人', desc: '初来奈良公园' },
+    { min: 1, name: '初露锋芒', desc: '完成第一次分享' },
+    { min: 3, name: '分享小能手', desc: '累计分享 3 次' },
+    { min: 10, name: '鹿群挚友', desc: '累计分享 10 次' },
+    { min: 25, name: '奈良百事通', desc: '累计分享 25 次' },
+    { min: 50, name: '鹿仙·传说分享王', desc: '累计分享 50 次' },
+  ];
+
+  private computeTitle(shares: number): { name: string; desc: string } {
+    let result = Game.SHARE_TITLES[0];
+    for (const t of Game.SHARE_TITLES) {
+      if (shares >= t.min) result = t;
+    }
+    return result;
+  }
+
+  private loadTotalShares(): number {
+    try {
+      const v = localStorage.getItem('naradeer_total_shares');
+      return v ? Math.max(0, parseInt(v, 10) || 0) : 0;
+    } catch {
+      return 0;
     }
   }
 
-  private rewardShare(): void {
-    if (this.shareUsedThisLevel) return;
-    this.shareUsedThisLevel = true;
-    this.money += 100;
-    this.audio.feed();
-    this.hud.setShareAvailable(false);
+  private saveTotalShares(): void {
+    try {
+      localStorage.setItem('naradeer_total_shares', String(this.totalShares));
+    } catch {
+      /* ignore quota / privacy-mode errors */
+    }
   }
 
   private setupFeedInput(): void {
@@ -796,37 +1069,9 @@ export class Game {
         return;
       }
       if (e.code === 'KeyE') {
-        this.feedKeyPressed.add('keyboard');
         this.tryFeed();
       }
     });
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'KeyE') {
-        this.feedKeyPressed.delete('keyboard');
-      }
-    });
-
-    const feedBtn = document.getElementById('feed-button');
-    if (feedBtn) {
-      feedBtn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        this.feedKeyPressed.add('mobile');
-        this.tryFeed();
-      });
-      feedBtn.addEventListener('pointerup', () => {
-        this.feedKeyPressed.delete('mobile');
-      });
-      feedBtn.addEventListener('pointerleave', () => {
-        this.feedKeyPressed.delete('mobile');
-      });
-      feedBtn.addEventListener('touchstart', () => {
-        this.feedKeyPressed.add('mobile');
-        this.tryFeed();
-      }, { passive: true });
-      feedBtn.addEventListener('touchend', () => {
-        this.feedKeyPressed.delete('mobile');
-      }, { passive: true });
-    }
   }
 
   private setupShareButton(): void {
@@ -840,6 +1085,117 @@ export class Game {
       this.audio.uiClick();
       this.doShare();
     });
+  }
+
+  private setupShop(): void {
+    const openBtn = document.getElementById('shop-button');
+    const overlay = document.getElementById('shop-overlay');
+    const closeBtn = document.getElementById('shop-close');
+    if (!openBtn || !overlay || !closeBtn) return;
+    openBtn.addEventListener('click', () => {
+      this.audio.uiClick();
+      this.openShop();
+    });
+    closeBtn.addEventListener('click', () => {
+      this.audio.uiClick();
+      this.closeShop();
+    });
+    overlay.querySelector('.shop-backdrop')?.addEventListener('click', () => this.closeShop());
+  }
+
+  private openShop(): void {
+    const overlay = document.getElementById('shop-overlay');
+    if (!overlay) return;
+    this.renderShop();
+    overlay.classList.remove('hidden');
+  }
+
+  private closeShop(): void {
+    document.getElementById('shop-overlay')?.classList.add('hidden');
+  }
+
+  /** Rebuild the shop grid + money display. Cheap enough for 6 items. */
+  private renderShop(): void {
+    const grid = document.getElementById('shop-grid');
+    const moneyEl = document.getElementById('shop-money-count');
+    if (!grid) return;
+    if (moneyEl) moneyEl.textContent = String(this.money);
+    grid.innerHTML = '';
+    for (const item of SHOP_ITEMS) {
+      const locked = this.currentLevel < item.unlockLevel;
+      const owned = item.once === true && this.bikeActive;
+      const afford = this.money >= item.cost;
+      const card = document.createElement('div');
+      card.className = 'shop-card' + (locked ? ' locked' : '') + (owned ? ' owned' : '');
+      card.innerHTML =
+        '<div class="shop-card-icon">' + item.icon + '</div>' +
+        '<div class="shop-card-info">' +
+          '<div class="shop-card-name">' + item.name +
+            (locked ? ' <span class="shop-lock">🔒 L' + item.unlockLevel + '</span>' : '') +
+          '</div>' +
+          '<div class="shop-card-desc">' + item.desc + '</div>' +
+        '</div>' +
+        '<button type="button" class="shop-buy"' +
+          (locked || owned || !afford ? ' disabled' : '') + '>' +
+          (owned ? '已拥有' : (locked ? '未解锁' : ('💰 ' + item.cost))) +
+        '</button>';
+      const buyBtn = card.querySelector('.shop-buy') as HTMLButtonElement | null;
+      if (buyBtn && !locked && !owned && afford) {
+        buyBtn.addEventListener('click', () => this.buyItem(item));
+      }
+      grid.appendChild(card);
+    }
+  }
+
+  private buyItem(item: ShopItemDef): void {
+    const locked = this.currentLevel < item.unlockLevel;
+    if (locked) { this.hud.showToast('该道具尚未解锁'); return; }
+    if (item.once === true && this.bikeActive) { this.hud.showToast('已拥有该道具'); return; }
+    if (this.money < item.cost) { this.hud.showToast('金钱不足！'); return; }
+    this.money -= item.cost;
+    this.audio.uiClick();
+    this.applyItem(item.id);
+    this.renderShop(); // refresh affordance + money
+  }
+
+  private applyItem(id: string): void {
+    switch (id) {
+      case 'whistle':   this.useWhistle(); break;
+      case 'radar':     this.radarTimer = 30; this.hud.showToast('📡 雷达启动！30 秒内箭头指向最近未喂鹿'); break;
+      case 'speed':     this.speedBoostTimer = 20; this.hud.showToast('💨 速度提升！20 秒移速 ×1.8'); break;
+      case 'waterward': this.waterWardTimer = 60; this.hud.showToast('☂️ 避水护体！60 秒免疫水池'); break;
+      case 'stealth':   this.stealthTimer = 15; this.hud.showToast('👘 隐身！15 秒内稀有 / 传说鹿不逃跑'); break;
+      case 'bike':      this.bikeActive = true; this.hud.showToast('🚲 骑上环保自行车！本关移速 ×2.5'); break;
+    }
+  }
+
+  /** Lure the nearest unfed, non-aggressive deer (up to 3) toward the player. */
+  private useWhistle(): void {
+    const pp = this.player.group.position;
+    const candidates = this.deerList
+      .filter((d) => d.canBeFed() && d.personality !== DeerPersonality.Aggressive)
+      .map((d) => ({ d, dist: d.group.position.distanceTo(pp) }))
+      .filter((x) => x.dist < 25)
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 3);
+    if (candidates.length === 0) {
+      this.hud.showToast('附近没有可召唤的小鹿');
+      return;
+    }
+    for (const c of candidates) c.d.whistleAttract();
+    this.hud.showToast('🎵 鹿笛吹响！' + candidates.length + ' 只鹿正向你跑来');
+  }
+
+  private findNearestUnfedDeer(): Deer | null {
+    const pp = this.player.group.position;
+    let best: Deer | null = null;
+    let bestDist = Infinity;
+    for (const d of this.deerList) {
+      if (!d.canBeFed()) continue;
+      const dist = d.group.position.distanceTo(pp);
+      if (dist < bestDist) { bestDist = dist; best = d; }
+    }
+    return best;
   }
 
   private setupJournalInput(): void {
@@ -869,24 +1225,46 @@ export class Game {
     }
   }
 
+  private setupJournalShare(): void {
+    const btn = document.getElementById('journal-share-button');
+    if (!btn || btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+      this.audio.uiClick();
+      this.journal.close();
+      // Share from the codex: completion share when the level is done,
+      // otherwise the in-level share.
+      if (this.levelComplete) this.doCompletionShare();
+      else this.doShare();
+    });
+  }
+
   private doFeed(deer: Deer): void {
     deer.startEating();
     this.deerFed++;
     this.crackerCount--;
     this.feedCooldown = 0.3;
-    this.audio.feed();
+    this.audio.feed(deer.group.position);
     this.hud.showToast('喂食成功！🦌');
     this.journal.markCollected(deer.index);
 
     const deerPos = deer.group.position.clone();
-    this.particles.emitHeart(deerPos.add(new THREE.Vector3(0, 1, 0)));
+    const heartPos = deerPos.clone().add(new THREE.Vector3(0, 1, 0));
+    // A burst of hearts + confetti so feeding feels rewarding (emotional value).
+    this.particles.emitHeart(heartPos);
+    this.particles.emitHeart(heartPos.clone().add(new THREE.Vector3(0.22, 0.25, 0.1)));
+    this.particles.emitHeart(heartPos.clone().add(new THREE.Vector3(-0.22, 0.35, -0.1)));
     this.particles.emitPickup(deer.group.position.clone());
+    this.particles.emitConfetti(heartPos);
     this.hud.flashPickup();
 
     setTimeout(() => {
       if (deer.isHappy()) {
-        this.audio.deerHappy();
-        this.particles.emitHeart(deer.group.position.clone().add(new THREE.Vector3(0, 1.5, 0)));
+        this.audio.deerHappy(deer.group.position);
+        const happyPos = deer.group.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+        this.particles.emitHeart(happyPos);
+        this.particles.emitHeart(happyPos.clone().add(new THREE.Vector3(0.28, 0.15, 0.2)));
+        this.particles.emitConfetti(happyPos);
       }
     }, 2800);
   }
@@ -927,17 +1305,25 @@ export class Game {
   }
 
   private createObstacles(): void {
+    const f = contentScaleFor(getBoundsForLevel(1)); // created once, at level-1 size
     for (const def of OBSTACLES) {
-      const obs = new Obstacle(def);
+      const obs = new Obstacle({ ...def, x: def.x * f, z: def.z * f });
       this.obstacles.push(obs);
       this.scene.add(obs.group);
     }
   }
 
   private createDeer(): void {
+    const f = contentScaleFor(getBoundsForLevel(1)); // created once, at level-1 size
     for (const spawn of DEER_SPAWNS) {
-      const position = new THREE.Vector3(spawn.x, 0, spawn.z);
+      const position = new THREE.Vector3(spawn.x * f, 0, spawn.z * f);
       const deer = new Deer(this.deerList.length, position, { detectionRange: 4 + Math.random() * 2 });
+      // Teach the tease rule via clear toasts: warn when the player starts to
+      // leave an expectant deer, then explain when it actually gets angry.
+      deer.onTease = (stage) => {
+        if (stage === 'warning') this.hud.showToast('小鹿在等仙贝，走开它会生气哦！🦌');
+        else this.hud.showToast('你没喂就走开了，小鹿生气了！下次靠近请喂食');
+      };
       this.deerList.push(deer);
       this.scene.add(deer.group);
     }
@@ -954,26 +1340,31 @@ export class Game {
     }
     this.vendors.length = 0;
 
-    let count: number;
-    if (level <= 0) count = 0;
-    else if (level >= 5) count = 1;
-    else count = 5 - (level - 1); // level 1:5, 2:4, 3:3, 4:2
-
-    if (level >= 5) {
-      // Random position for single vendor
-      const x = (Math.random() - 0.5) * this.currentBounds.halfWidth * 0.6;
-      const z = (Math.random() - 0.5) * this.currentBounds.halfDepth * 0.6;
+    // Fewer stalls at higher levels so the game gets harder (less free food to
+    // buy). Level 1 starts generous so the early game stays approachable; later
+    // levels go sparse, nudging players toward sharing for the 100円 bonus.
+    // From level 8 on there is only a single stall.
+    const count = Math.max(1, 9 - level); // L1:8, L2:7 … L7:2, L8+:1
+    const minDist = 10;
+    let placed = 0;
+    let attempts = 0;
+    while (placed < count && attempts < 300) {
+      attempts++;
+      const x = (Math.random() - 0.5) * this.currentBounds.halfWidth * 1.4;
+      const z = (Math.random() - 0.5) * this.currentBounds.halfDepth * 1.4;
+      // Keep the player's spawn point clear.
+      if (Math.abs(x) < 6 && Math.abs(z) < 6) continue;
+      let tooClose = false;
+      for (const v of this.vendors) {
+        const dx = v.group.position.x - x;
+        const dz = v.group.position.z - z;
+        if (Math.sqrt(dx * dx + dz * dz) < minDist) { tooClose = true; break; }
+      }
+      if (tooClose) continue;
       const vendor = new Vendor(x, z);
       this.vendors.push(vendor);
       this.scene.add(vendor.group);
-    } else {
-      // Pick random subset from fixed positions
-      const shuffled = [...VENDOR_SPAWNS].sort(() => Math.random() - 0.5);
-      for (let i = 0; i < count && i < shuffled.length; i++) {
-        const vendor = new Vendor(shuffled[i].x, shuffled[i].z);
-        this.vendors.push(vendor);
-        this.scene.add(vendor.group);
-      }
+      placed++;
     }
   }
 
@@ -1011,9 +1402,13 @@ export class Game {
     }
     this.chests.length = 0;
 
-    const moneyValues = distributeMoney(moneyPool, CHEST_SPAWNS.length);
-    for (let i = 0; i < CHEST_SPAWNS.length; i++) {
-      const chest = new TreasureChest(CHEST_SPAWNS[i].x, CHEST_SPAWNS[i].z, moneyValues[i]);
+    const f = contentScaleFor(this.currentBounds); // scale design-space spawns to the arena
+    // Fewer chests at higher levels → less free money to pick up (difficulty ramp).
+    const chestCount = Math.max(8, 25 - this.currentLevel * 2); // L1:23 … L9+:8
+    const spawns = CHEST_SPAWNS.slice(0, chestCount);
+    const moneyValues = distributeMoney(moneyPool, spawns.length);
+    for (let i = 0; i < spawns.length; i++) {
+      const chest = new TreasureChest(spawns[i].x * f, spawns[i].z * f, moneyValues[i]);
       this.chests.push(chest);
       this.scene.add(chest.group);
     }

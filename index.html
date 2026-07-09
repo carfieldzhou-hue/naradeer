@@ -77,10 +77,11 @@
       <!-- Share button -->
       <button id="share-button" type="button" class="share-btn" style="display:none">📤 分享给好友 (100円)</button>
 
-      <!-- Jump hint -->
-      <div id="jump-hint" class="hidden desktop-only">
-        <div class="hint-text">[空格] 跳跃跨越障碍</div>
-      </div>
+      <!-- Shop button -->
+      <button id="shop-button" type="button" class="shop-btn" style="display:none">🛍 道具</button>
+
+      <!-- Deer radar arrow (points to nearest unfed deer) -->
+      <div id="radar-arrow" class="hidden"><span>🦌▲</span></div>
 
       <!-- Completion overlay -->
       <section id="completion-overlay" class="hidden" data-hide-on-hidden="1">
@@ -112,7 +113,9 @@
         <div class="journal-panel">
           <div class="journal-header">
             <h2>🦌 鹿图鉴</h2>
+            <span class="journal-title" id="journal-title">新手饲鹿人</span>
             <span class="journal-progress"><span id="journal-count">0</span> / <span id="journal-total">16</span></span>
+            <button id="journal-share-button" type="button" class="journal-share-btn">📤 分享 (+100円)</button>
             <button id="journal-close" type="button" aria-label="关闭">✕</button>
           </div>
           <div class="journal-grid" id="journal-grid">
@@ -121,13 +124,25 @@
         </div>
       </section>
 
-      <!-- Touch controls (one-handed: joystick + feed) -->
+      <!-- Touch controls: joystick. Feed = tap the joystick centre (one thumb). -->
       <div id="touch-controls" aria-hidden="true">
         <div id="touch-stick">
           <div id="touch-knob"></div>
         </div>
-        <button id="feed-button" type="button" aria-label="喂食">🦌</button>
       </div>
+
+      <!-- Item shop -->
+      <section id="shop-overlay" class="hidden">
+        <div class="shop-backdrop"></div>
+        <div class="shop-panel">
+          <div class="shop-header">
+            <h2>🛍 道具商店</h2>
+            <span class="shop-money">💰 <span id="shop-money-count">0</span> 円</span>
+            <button id="shop-close" type="button" aria-label="关闭">✕</button>
+          </div>
+          <div class="shop-grid" id="shop-grid"></div>
+        </div>
+      </section>
 
       <!-- Orientation overlay (mobile landscape -> portrait hint) -->
       <div id="orientation-overlay" aria-hidden="true">
@@ -142,7 +157,7 @@
           <h1>奈良公園</h1>
           <p class="title-sub">来给鹿喂仙贝吧！</p>
           <div class="title-instructions">
-            <p class="desktop-only">WASD / 摇杆移动 &nbsp; [空格] 跳跃</p>
+            <p class="desktop-only">WASD / 摇杆移动</p>
             <p class="mobile-only">摇杆移动 · 点击 🦌 喂食</p>
             <p><span class="desktop-only">靠近小鹿后按 [E] 喂食</span><span class="mobile-only">靠近小鹿后点击 🦌 喂食</span></p>
             <p><span class="desktop-only">[Tab] 打开图鉴查看收集进度</span><span class="mobile-only">点击 📖 打开图鉴查看收集进度</span></p>

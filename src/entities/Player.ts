@@ -16,8 +16,10 @@ export class Player {
   readonly group = new THREE.Group();
   readonly velocity = new THREE.Vector3();
 
-  /** Callback triggered on jump */
-  onJump: (() => void) | null = null;
+  /** Speed multiplier applied by consumable items (speed charm / eco bike).
+   *  Set by Game each frame; 1 = no boost. */
+  boostMultiplier = 1;
+
   /** Callback triggered on dash */
   onDash: (() => void) | null = null;
 
@@ -69,12 +71,6 @@ export class Player {
   private readonly crackerMat: THREE.MeshStandardMaterial;
 
   private walkPhase = 0;
-
-  // Jump physics
-  private verticalVelocity = 0;
-  private onGround = true;
-  private readonly jumpVelocity = 2.8;
-  private readonly gravity = -14;
 
   private previouslyDashing = false;
 
@@ -241,32 +237,25 @@ export class Player {
     const cosYaw = Math.cos(cameraYaw);
     const worldX = this.move.x * cosYaw + this.move.y * sinYaw;
     const worldZ = -this.move.x * sinYaw + this.move.y * cosYaw;
-    this.targetVelocity.set(worldX, 0, worldZ).multiplyScalar(tuning.speed * dash);
+    this.targetVelocity.set(worldX, 0, worldZ).multiplyScalar(tuning.speed * dash * this.boostMultiplier);
 
-    // Rotate player body to face camera direction
-    this.bodyGroup.rotation.y = cameraYaw;
+    // Rotate the player body to face the direction of travel. Previously the
+    // body was locked to the camera yaw, so it always "faced forward" even when
+    // strafing or walking backwards. Now it turns toward the actual movement
+    // vector, with a smooth shortest-arc spin so it never snaps.
+    const moveLen = Math.hypot(worldX, worldZ);
+    if (moveLen > 0.01) {
+      // The model's front is local -Z (eyes face -Z), so we want -Z to point
+      // along (worldX, worldZ): rotation.y = atan2(-worldX, -worldZ).
+      const targetYaw = Math.atan2(-worldX, -worldZ);
+      let diff = targetYaw - this.bodyGroup.rotation.y;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // wrap to [-PI, PI]
+      const turn = 1 - Math.exp(-12 * delta); // frame-rate independent smoothing
+      this.bodyGroup.rotation.y += diff * turn;
+    }
 
     const smoothing = 1 - Math.exp(-tuning.acceleration * delta);
     this.velocity.lerp(this.targetVelocity, smoothing);
-
-    // Jump
-    if (input.consumeJump() && this.onGround) {
-      this.verticalVelocity = this.jumpVelocity;
-      this.onGround = false;
-      this.onJump?.();
-    }
-
-    // Gravity
-    if (!this.onGround) {
-      this.verticalVelocity += this.gravity * delta;
-      this.group.position.y += this.verticalVelocity * delta;
-      // Ground collision
-      if (this.group.position.y <= 0) {
-        this.group.position.y = 0;
-        this.verticalVelocity = 0;
-        this.onGround = true;
-      }
-    }
 
     this.group.position.addScaledVector(this.velocity, delta);
 
@@ -293,7 +282,9 @@ export class Player {
   }
 
   isOnGround(): boolean {
-    return this.onGround;
+    // Jumping was removed; the player is always grounded. Kept because the
+    // obstacle-collision code still queries it.
+    return true;
   }
 
   getFeedPosition(): THREE.Vector3 {

@@ -3,6 +3,15 @@ import { Game } from './game/Game';
 import { loadDeerTemplate, onLoadProgress as onDeerLoadProgress } from './entities/DeerModel';
 import { loadVendorTemplate, onLoadProgress as onVendorLoadProgress } from './entities/VendorModel';
 
+// Detect the REAL input device and tag <body> so CSS shows the correct control
+// hints (desktop vs touch). We deliberately do NOT rely on @media (pointer:
+// coarse) here — it fails to match on some phones and responsive previews,
+// which made computer-only hints (WASD / [Tab] / [E]) leak onto phones.
+const isTouch =
+  'ontouchstart' in window ||
+  (typeof navigator !== 'undefined' && (navigator.maxTouchPoints ?? 0) > 0);
+document.body.classList.add(isTouch ? 'is-touch' : 'is-desktop');
+
 const canvasEl = document.querySelector<HTMLCanvasElement>('#game-canvas');
 const startBtn = document.getElementById('start-button');
 const titleOverlay = document.getElementById('title-overlay');
@@ -41,7 +50,7 @@ function wireUiHandlers(): void {
         );
         return;
       }
-      game.journal.toggle();
+      game.toggleJournal();
     };
     hint.addEventListener('click', handler);
     // Eat pointerdown so the canvas/camera handler doesn't also fire.

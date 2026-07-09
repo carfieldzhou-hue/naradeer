@@ -47,6 +47,7 @@ export class Park {
   private groundTexture!: THREE.CanvasTexture;
   private waterMeshes: THREE.Mesh[] = [];
   private waterTime = 0;
+  private currentLevel = 1;
   private flowerMeshes: THREE.Mesh[] = [];
   private spread = 3.5;
 
@@ -80,7 +81,8 @@ export class Park {
 
     this._createPaths(bounds);
     this._buildMainPlaza(bounds);
-    this._buildPondGarden(bounds);
+    // Pond + water only from level 2 on (level 1 stays water-free & easier).
+    if (this.currentLevel >= 2) this._buildPondGarden(bounds);
     this._buildShrineCorner(bounds);
     this._buildBambooGrove(bounds);
     this._buildHillViewpoint(bounds);
@@ -94,7 +96,8 @@ export class Park {
     this._setupBench(bounds);
   }
 
-  regenerate(bounds: ParkBounds): void {
+  regenerate(bounds: ParkBounds, level = 1): void {
+    this.currentLevel = level;
     this.dispose();
     for (const child of [...this.group.children]) {
       this.group.remove(child);
@@ -475,10 +478,14 @@ export class Park {
   }
 
   private _scatterWaterHazards(bounds: ParkBounds): void {
+    // No scattered hazards on level 1. From level 2 on, a few small,
+    // easily-bypassable puddles, growing slightly each level.
+    const count = this.currentLevel <= 1 ? 0
+      : Math.min(8, Math.floor((this.currentLevel - 1) * 1.5));
+    if (count <= 0) return;
     const waterMat = new THREE.MeshStandardMaterial({
       color: '#4fc3f7', roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.6,
     });
-    const count = Math.floor(6 * bounds.halfWidth / 120);
     for (let i = 0; i < count; i++) {
       let attempts = 0;
       while (attempts < 20) {
@@ -494,7 +501,7 @@ export class Park {
           if (Math.sqrt(dx * dx + dz * dz) < wz.radius + 3) { overlap = true; break; }
         }
         if (overlap) { attempts++; continue; }
-        const radius = 0.8 + Math.random() * 1.5;
+        const radius = 0.6 + Math.random() * 0.9;
         const puddle = new THREE.Mesh(new THREE.CircleGeometry(radius, 12), waterMat);
         puddle.rotation.x = -Math.PI / 2;
         puddle.position.set(x, 0.02, z);
@@ -572,7 +579,10 @@ export class Park {
   }
 
   private _scatterCoins(bounds: ParkBounds): void {
-    const count = Math.floor(20 * bounds.halfWidth / 120);
+    // Fewer loose coins at higher levels so "捡钱" diminishes as difficulty
+    // rises (instead of growing with the map). Pairs with the shrinking chest
+    // pool to push players toward sharing for the 100円 bonus.
+    const count = Math.max(5, 22 - this.currentLevel * 2); // L1:20 … L9+:5
     for (let i = 0; i < count; i++) {
       let attempts = 0;
       while (attempts < 30) {

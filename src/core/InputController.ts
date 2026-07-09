@@ -21,7 +21,6 @@ export class InputController {
   };
 
   private dashDown = false;
-  private jumpPressed = false;
   private cameraYaw = 0;
   private mouseButton = -1;
   private cameraPitch = 0.4;
@@ -35,12 +34,13 @@ export class InputController {
   private readonly onWindowTouchMove: (e: TouchEvent) => void;
   private readonly onWindowTouchEnd: (e: TouchEvent) => void;
 
+  // A quick tap on the joystick centre (no drag) is treated as a "feed" press,
+  // so one thumb can both move (drag the rim) and feed (tap the centre).
+  private stickMoved = false;
+  private feedCallback: (() => void) | null = null;
+
   private readonly onKeyDown = (event: KeyboardEvent) => {
     this.keys.add(event.code);
-    if (event.code === 'Space') {
-      event.preventDefault();
-      this.jumpPressed = true;
-    }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
       this.dashDown = true;
     }
@@ -48,9 +48,6 @@ export class InputController {
 
   private readonly onKeyUp = (event: KeyboardEvent) => {
     this.keys.delete(event.code);
-    if (event.code === 'Space') {
-      event.preventDefault();
-    }
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
       this.dashDown = false;
     }
@@ -71,15 +68,20 @@ export class InputController {
     this.pointerState.centerX = this.stickRect.left + this.stickRect.width / 2;
     this.pointerState.centerY = this.stickRect.top + this.stickRect.height / 2;
     this.pointerState.radius = this.stickRect.width * 0.42;
+    this.stickMoved = false;
     this.updatePointer(clientX, clientY);
   }
 
   private handleStickUp(id: number): void {
     if (id !== this.pointerState.id) return;
+    const wasTap = !this.stickMoved;
     this.pointerState.active = false;
     this.pointerState.id = null;
+    this.stickMoved = false;
     this.pointer.set(0, 0);
     this.updateKnob();
+    // A tap that never left the dead-zone feeds; a drag just moved the player.
+    if (wasTap && this.feedCallback) this.feedCallback();
   }
 
   // --- Joystick: start on element, move/end on window ---
@@ -253,6 +255,10 @@ export class InputController {
     return this.cameraYaw;
   }
 
+  setFeedCallback(cb: () => void): void {
+    this.feedCallback = cb;
+  }
+
   getCameraPitch(): number {
     return this.cameraPitch;
   }
@@ -271,14 +277,6 @@ export class InputController {
 
   isDashHeld(): boolean {
     return this.dashDown;
-  }
-
-  consumeJump(): boolean {
-    if (this.jumpPressed) {
-      this.jumpPressed = false;
-      return true;
-    }
-    return false;
   }
 
   dispose(): void {
@@ -307,6 +305,8 @@ export class InputController {
     const dy = clientY - this.pointerState.centerY;
     this.pointer.set(dx / this.pointerState.radius, dy / this.pointerState.radius);
     if (this.pointer.lengthSq() > 1) this.pointer.normalize();
+    // Flag a real drag so a centre tap isn't mistaken for movement.
+    if (this.pointer.lengthSq() > 0.09) this.stickMoved = true;
     this.updateKnob();
   }
 

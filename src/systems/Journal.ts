@@ -99,12 +99,18 @@ export class Journal {
     return this.collected.has(index);
   }
 
+  /** Number of deer species the player has collected so far (for share copy). */
   getCollectedCount(): number {
     return this.collected.size;
   }
 
   getTotalCount(): number {
     return this.entries.length;
+  }
+
+  setTitle(title: string): void {
+    const el = document.getElementById('journal-title');
+    if (el) el.textContent = title;
   }
 
   open(): void {

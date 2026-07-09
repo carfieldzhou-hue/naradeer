@@ -199,31 +199,6 @@ body {
   50% { transform: translateX(-50%) scale(1.05); opacity: 0.85; }
 }
 
-/* ===== Jump Hint ===== */
-#jump-hint {
-  position: absolute;
-  bottom: 38%;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 18px;
-  background: rgba(0, 0, 0, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 16px;
-  backdrop-filter: blur(8px);
-  z-index: 10;
-  pointer-events: none;
-}
-#jump-hint.hidden {
-  display: none;
-}
-#jump-hint .hint-text {
-  font-size: 0.8rem;
-  color: #a5d6a7;
-}
-
 /* ===== Completion Overlay ===== */
 #completion-overlay {
   position: absolute;
@@ -413,6 +388,173 @@ body {
   transform: scale(1.05);
 }
 
+/* ===== Shop Button + Panel ===== */
+.shop-btn {
+  position: absolute;
+  top: max(188px, calc(10px + 55px + 28px + 24px + 38px + 44px));
+  right: 12px;
+  padding: 8px 14px;
+  background: rgba(129, 199, 132, 0.22);
+  border: 1px solid rgba(129, 199, 132, 0.45);
+  border-radius: 8px;
+  color: #a5d6a7;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 15;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s, transform 0.15s;
+  pointer-events: auto;
+}
+.shop-btn:hover {
+  background: rgba(129, 199, 132, 0.38);
+  transform: scale(1.05);
+}
+
+#shop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 26;
+}
+#shop-overlay.hidden {
+  display: none;
+}
+.shop-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+}
+.shop-panel {
+  position: relative;
+  width: min(560px, 92vw);
+  max-height: min(82vh, 620px);
+  background: rgba(30, 30, 30, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.shop-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.shop-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.shop-money {
+  margin-left: auto;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffd54f;
+}
+#shop-close {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 1.2rem;
+  cursor: pointer;
+  opacity: 0.7;
+}
+#shop-close:hover {
+  opacity: 1;
+}
+.shop-grid {
+  padding: 12px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.shop-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+.shop-card.locked {
+  opacity: 0.45;
+}
+.shop-card.owned {
+  background: rgba(129, 199, 132, 0.12);
+  border-color: rgba(129, 199, 132, 0.35);
+}
+.shop-card-icon {
+  font-size: 1.6rem;
+  width: 40px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.shop-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.shop-card-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+}
+.shop-lock {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ffb74d;
+  margin-left: 6px;
+}
+.shop-card-desc {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+}
+.shop-buy {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #ffb74d, #ff8a65);
+  border: none;
+  border-radius: 999px;
+  color: #3a2a12;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.shop-buy:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+}
+.shop-buy:not(:disabled):hover {
+  transform: scale(1.05);
+}
+
+/* ===== Deer Radar Arrow ===== */
+#radar-arrow {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.8rem;
+  color: #ffd54f;
+  z-index: 14;
+  pointer-events: none;
+  text-shadow: 0 0 8px rgba(255, 213, 79, 0.8), 0 2px 4px rgba(0, 0, 0, 0.6);
+  transition: opacity 0.2s;
+}
+#radar-arrow.hidden {
+  display: none;
+}
+
 /* ===== Orientation Overlay ===== */
 /* Soft suggestion only: a small non-blocking banner. We no longer hide the
    game when the player is in landscape — many users prefer landscape for
@@ -480,33 +622,26 @@ body {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 44%;
+  width: 46%;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: #fff8e1;
-  box-shadow: 0 0 24px rgba(255, 248, 225, 0.3);
+  background: radial-gradient(circle at 50% 40%, #fff8e1, #ffe9a8);
+  box-shadow: 0 0 24px rgba(255, 213, 79, 0.5);
   transform: translate(-50%, -50%);
   pointer-events: none;
-}
-
-#feed-button {
-  width: clamp(56px, 18vw, 80px);
-  aspect-ratio: 1;
-  border: 2px solid rgba(255, 213, 79, 0.5);
-  border-radius: 50%;
-  background: rgba(255, 213, 79, 0.25);
-  font-size: 1.5rem;
-  pointer-events: auto;
-  touch-action: manipulation;
-  cursor: pointer;
-  transition: transform 0.1s, background 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-#feed-button:active {
-  background: rgba(255, 213, 79, 0.45);
-  transform: scale(0.9);
+/* The knob doubles as the feed button — tap the centre to feed. */
+#touch-knob::after {
+  content: '🦌';
+  font-size: 1.5rem;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.25));
+}
+#touch-knob:active {
+  box-shadow:0 0 30px rgba(255, 213, 79, 0.8);
 }
 
 /* ===== Journal Overlay ===== */
@@ -559,6 +694,33 @@ body {
   font-size: 0.85rem;
   opacity: 0.7;
   font-weight: 600;
+}
+.journal-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ffd54f;
+  background: rgba(255, 213, 79, 0.12);
+  border: 1px solid rgba(255, 213, 79, 0.35);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.journal-share-btn {
+  background: linear-gradient(135deg, #ffb74d, #ff8a65);
+  border: none;
+  border-radius: 999px;
+  color: #3a2a12;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: transform 0.12s, filter 0.12s;
+}
+.journal-share-btn:hover {
+  filter: brightness(1.06);
+}
+.journal-share-btn:active {
+  transform: scale(0.97);
 }
 #journal-close {
   background: rgba(255,255,255,0.1);
@@ -779,20 +941,21 @@ body {
   box-shadow: 0 4px 20px rgba(255, 213, 79, 0.3);
 }
 
-/* ===== Desktop / Mobile toggle ===== */
-.desktop-only {
-  display: inline;
-}
+/* ===== Desktop / Mobile toggle =====
+   Driven by a <body> class set in main.ts from the REAL input device
+   (is-touch / is-desktop), NOT by @media (pointer: coarse) — which is
+   unreliable on some phones and responsive previews. Default-safe: both
+   variants are hidden until a body class re-enables exactly one of them.
+   `revert` lets each element keep its natural display (p→block, span→inline). */
+.desktop-only,
 .mobile-only {
   display: none;
 }
-@media (pointer: coarse) {
-  .desktop-only {
-    display: none !important;
-  }
-  .mobile-only {
-    display: inline;
-  }
+.is-desktop .desktop-only {
+  display: revert;
+}
+.is-touch .mobile-only {
+  display: revert;
 }
 
 /* ===== Responsive ===== */
@@ -929,11 +1092,6 @@ body {
     width: clamp(130px, 32vw, 160px);
   }
 
-  #feed-button {
-    width: clamp(64px, 20vw, 88px);
-    font-size: 1.8rem;
-  }
-
   .title-card {
     padding: 28px 20px;
   }
@@ -1019,4 +1177,83 @@ body {
 }
 #share-guide-card .share-guide-close:active {
   transform: scale(0.98);
+}
+
+/* Share panel — explicit share buttons for browsers without Web Share API
+   (desktop Firefox/Safari) and in-app browsers (WeChat/QQ). Mirrors the
+   share-guide-card visual language. */
+#share-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#share-panel .share-panel-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+#share-panel .share-panel {
+  position: relative;
+  z-index: 1;
+  max-width: 340px;
+  width: calc(100% - 40px);
+  background: rgba(28, 24, 22, 0.96);
+  border: 1px solid rgba(255, 213, 79, 0.35);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  color: #f6f1df;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  animation: shareGuideIn 0.32s ease-out;
+  text-align: center;
+}
+#share-panel h3 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  color: #ffd54f;
+}
+#share-panel .share-panel-sub {
+  margin: 0 0 16px;
+  font-size: 0.85rem;
+  color: #d8cfb6;
+}
+#share-panel .share-panel-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+#share-panel .sp-btn {
+  width: 100%;
+  padding: 11px 0;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+#share-panel .sp-copy {
+  background: #ffd54f;
+  color: #1c1816;
+}
+#share-panel .sp-wechat {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f6f1df;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+#share-panel .sp-btn:active {
+  transform: scale(0.98);
+}
+#share-panel .sp-close {
+  display: block;
+  width: 100%;
+  padding: 9px 0;
+  background: transparent;
+  color: #b9b09a;
+  border: none;
+  font-size: 0.9rem;
+  cursor: pointer;
 }

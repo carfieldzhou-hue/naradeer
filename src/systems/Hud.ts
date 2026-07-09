@@ -4,7 +4,6 @@ export class Hud {
   private readonly timerValue = this.getElement('#timer-value');
   private readonly statusText = this.getElement('#status-text');
   private readonly feedHint = this.getElement('#feed-hint');
-  private readonly jumpHint = this.getElement('#jump-hint');
   private readonly completionOverlay = this.getElement('#completion-overlay');
   private readonly completionTime = this.getElement('#completion-time');
   private readonly completionScore = this.getElement('#completion-score');
@@ -14,6 +13,7 @@ export class Hud {
   private readonly moneyTreeHint = this.getElement('#money-tree-hint');
   private readonly shareButton = this.getElement('#share-button');
   private readonly levelDisplay = this.getElement('#level-display');
+  private journalHintTextSet = false;
 
   setLevel(level: number, target: number): void {
     this.levelDisplay.textContent = `第 ${level} 关`;
@@ -27,6 +27,7 @@ export class Hud {
 
   hideCompletion(): void {
     this.completionOverlay.classList.remove('show');
+    this.completionOverlay.classList.add('hidden');
   }
 
   setShareAvailable(available: boolean): void {
@@ -40,7 +41,7 @@ export class Hud {
     complete: boolean,
     deerNearby: boolean,
     collectedCount?: number,
-    obstacleNearby?: boolean,
+    _obstacleNearby?: boolean,
     crackers?: number,
     money?: number,
     vendorNearby?: boolean,
@@ -90,13 +91,8 @@ export class Hud {
       this.setShareAvailable(shareAvailable);
     }
 
-    if (complete || !obstacleNearby) {
-      this.jumpHint.classList.add('hidden');
-    } else {
-      this.jumpHint.classList.remove('hidden');
-    }
-
     if (complete && !this.completionOverlay.classList.contains('show')) {
+      this.completionOverlay.classList.remove('hidden');
       this.completionOverlay.classList.add('show');
       this.completionTime.textContent = this.timerValue.textContent;
       this.completionScore.textContent = String(score);
@@ -112,7 +108,15 @@ export class Hud {
     // Touch-only devices have no Tab key, so always show the journal hint
     // entry. Desktop users still get the same chip once they've collected at
     // least one deer (matches the original "reward loop" intent).
-    const isTouchOnly = 'ontouchstart' in window && !matchMedia('(pointer: fine)').matches;
+    const isTouchOnly = document.body.classList.contains('is-touch');
+    // Set the hint copy ONCE based on the real input device, so phones never
+    // show a "press Tab" instruction that has no key to press.
+    if (journalHint && !this.journalHintTextSet) {
+      journalHint.innerHTML = isTouchOnly
+        ? '<span class="mobile-only">📖 点击打开鹿图鉴</span>'
+        : '<span class="desktop-only">📖 按 [Tab] 打开鹿图鉴</span>';
+      this.journalHintTextSet = true;
+    }
     const shouldShowHint =
       !!journalHint &&
       !complete &&
@@ -133,6 +137,19 @@ export class Hud {
       ],
       { duration: 250, easing: 'ease-out' },
     );
+  }
+
+  /** Show / hide the deer-radar arrow. Pass a screen-space angle in degrees
+   *  (0 = up, 90 = right) or null to hide it. */
+  setRadar(angleDeg: number | null): void {
+    const el = document.getElementById('radar-arrow');
+    if (!el) return;
+    if (angleDeg === null) {
+      el.classList.add('hidden');
+      return;
+    }
+    el.classList.remove('hidden');
+    el.style.transform = `translate(-50%, -50%) rotate(${angleDeg}deg)`;
   }
 
   showToast(msg: string, duration = 2000): void {

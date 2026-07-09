@@ -167,6 +167,7 @@ export class Deer {
   private eatingTimer = 0;
   private happyTimer = 0;
   private happyBob = 0;
+  private bowPhase = 0;
   private angryTimer = 0;
 
   aggressiveState: 'idle' | 'warning' | 'charging' | 'fleeing' = 'idle';
@@ -184,6 +185,14 @@ export class Deer {
   fed = false;
   available = true;
   readonly minLevel: number;
+
+  /** Fired when the player teases a deer (approaches then leaves unfed):
+   *  'warning' when they start to walk away, 'angry' when they fully leave. */
+  onTease: ((stage: 'warning' | 'angry') => void) | null = null;
+  private expectingFood = false;
+  private leaveWarned = false;
+  private playerStealthed = false;
+  private whistleTimer = 0;
 
   readonly personality: DeerPersonality;
   readonly rarity: DeerRarity;
@@ -382,9 +391,11 @@ export class Deer {
     }
   }
 
-  update(delta: number, playerPosition: THREE.Vector3, playerHasCrackers: boolean): void {
+  update(delta: number, playerPosition: THREE.Vector3, playerStealthed: boolean): void {
     // Advance animation mixer
     this.mixer.update(delta);
+    this.playerStealthed = playerStealthed;
+    if (this.whistleTimer > 0) this.whistleTimer -= delta;
 
     // Control walk animation speed based on velocity
     if (this.walkAction) {
@@ -400,14 +411,27 @@ export class Deer {
     if (this.personality === DeerPersonality.Aggressive) {
       this.updateAggressive(delta, playerPosition, distToPlayer);
     } else {
-      // Check if player is near and has no crackers -> become angry
-      if (distToPlayer < 1.5 && !playerHasCrackers && this.state.current !== DeerState.Eating && this.state.current !== DeerState.Happy && this.state.current !== DeerState.Angry) {
-        this.state.current = DeerState.Angry;
-        this.angryTimer = 1.5;
-        const pushDir = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
-        pushDir.y = 0;
-        pushDir.normalize().multiplyScalar(-3);
-        this.velocity.copy(pushDir);
+      // Tease rule: a deer that bowed expecting food gets upset only if the
+      // player walks away WITHOUT feeding. We warn first so the player learns
+      // the rule, then anger if they fully leave. (Previously the deer got
+      // angry merely for being near with no crackers, which punished the
+      // player for the game's own economy.)
+      if (this.expectingFood && !this.fed && this.state.current !== DeerState.Eating && this.state.current !== DeerState.Happy && this.state.current !== DeerState.Angry) {
+        if (!this.leaveWarned && distToPlayer > 3.0) {
+          this.leaveWarned = true;
+          this.onTease?.('warning');
+        }
+        if (distToPlayer > 5.0) {
+          this.expectingFood = false;
+          this.leaveWarned = false;
+          this.state.current = DeerState.Angry;
+          this.angryTimer = 1.5;
+          const pushDir = new THREE.Vector3().copy(playerPosition).sub(this.group.position);
+          pushDir.y = 0;
+          pushDir.normalize().multiplyScalar(-3);
+          this.velocity.copy(pushDir);
+          this.onTease?.('angry');
+        }
       }
     }
 
@@ -469,6 +493,22 @@ export class Deer {
         this.updateWander(delta, playerPosition, distToPlayer);
     }
 
+    // Bow animation: a visible, model-level forward pitch (the deer lowers its
+    // head toward the ground like a real Nara deer asking for crackers). This
+    // runs UNCONDITIONALLY so the bow reads clearly even when no addressable
+    // head bone exists — the FBX bone names are Meshy-generated and the head
+    // lookup often misses, so relying on headBone.rotation alone produced no
+    // visible nod. The mixer only animates child bones, not modelRoot, so this
+    // pitch is never overridden by the walk clip.
+    if (this.state.current === DeerState.Bow) {
+      this.bowPhase += delta * 4.5;
+      const dip = Math.max(0, Math.sin(this.bowPhase)); // 0..1, dip-and-rise
+      // Positive rotation.x pitches the nose (local +Z) down = a bow.
+      this.modelRoot.rotation.x = dip * 0.34;
+    } else {
+      this.modelRoot.rotation.x += (0 - this.modelRoot.rotation.x) * delta * 6;
+    }
+
     // Head tracking: look toward player when nearby, nod when happy
     if (this.headBone) {
       if (this.state.current === DeerState.Happy) {
@@ -478,6 +518,12 @@ export class Deer {
         this.happyBob += delta * nodSpeed;
         this.headBone.rotation.z = -Math.abs(Math.sin(this.happyBob)) * nodAmount;
         this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 3;
+      } else if (this.state.current === DeerState.Bow) {
+        // Extra head nod layered on top of the model-level bow (enhancement).
+        const dip = Math.max(0, Math.sin(this.bowPhase));
+        this.headBone.rotation.z = -0.12 - dip * 0.4;
+        this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 4;
+        this.headBone.rotation.x += (0 - this.headBone.rotation.x) * delta * 4;
       } else if (distToPlayer < this.getDetectionRange() * 1.5) {
         const headWorld = new THREE.Vector3();
         this.headBone.getWorldPosition(headWorld);
@@ -602,12 +648,13 @@ export class Deer {
       return;
     }
 
-    // Rarer deer get spooked more easily
+    // Rarer deer get spooked more easily — but the stealth cloak lets the
+    // player approach even Legendary deer without startling them.
     const rarityFleeThreshold = this.rarity === DeerRarity.Legendary ? 1.5
       : this.rarity === DeerRarity.Rare ? 2.5
       : this.rarity === DeerRarity.Uncommon ? 3.5
       : 4;
-    if ((this.personality === DeerPersonality.Shy || this.rarity === DeerRarity.Legendary) && this.playerVel.length() > rarityFleeThreshold) {
+    if ((this.personality === DeerPersonality.Shy || this.rarity === DeerRarity.Legendary) && this.playerVel.length() > rarityFleeThreshold && !this.playerStealthed) {
       this.state.current = DeerState.Wander;
       const fleeDir = new THREE.Vector3().copy(this.group.position).sub(playerPosition);
       fleeDir.y = 0;
@@ -627,6 +674,9 @@ export class Deer {
       const bowMult = this.personality === DeerPersonality.Curious ? 0.6 : this.personality === DeerPersonality.Aloof ? 1.5 : 1;
       this.state.timer = this.tuning.bowDuration * bowMult;
       this.velocity.set(0, 0, 0);
+      // The deer is now expecting food; walking away without feeding teases it.
+      this.expectingFood = true;
+      this.leaveWarned = false;
       return;
     }
 
@@ -748,6 +798,18 @@ export class Deer {
     this.state.current = DeerState.Eating;
     this.eatingTimer = this.tuning.eatDuration;
     this.fed = true;
+    this.expectingFood = false;
+    this.leaveWarned = false;
+  }
+
+  /** Called by the deer whistle item: lures this deer toward the player for a
+   *  few seconds, bypassing its normal (tiny) detection range so even shy /
+   *  rare deer come running. Aggressive and already-fed deer ignore it. */
+  whistleAttract(): void {
+    if (this.fed || !this.available) return;
+    if (this.personality === DeerPersonality.Aggressive) return;
+    this.state.current = DeerState.Approach;
+    this.whistleTimer = 5;
   }
 
   reset(level: number): void {
@@ -761,6 +823,9 @@ export class Deer {
     this.angryTimer = 0;
     this.aggressiveState = 'idle';
     this.aggressiveCooldown = 0;
+    this.expectingFood = false;
+    this.leaveWarned = false;
+    this.whistleTimer = 0;
     this.group.position.copy(this.homePosition);
     this.velocity.set(0, 0, 0);
   }
@@ -821,6 +886,9 @@ export class Deer {
     }
     if (this.personality === DeerPersonality.Shy) range *= 1.3;
     if (this.personality === DeerPersonality.Gentle) range *= 1.4;
+    // Deer whistle: temporarily massively extends detection so lured deer keep
+    // approaching from far away.
+    if (this.whistleTimer > 0) range *= 3;
     return range;
   }
 
