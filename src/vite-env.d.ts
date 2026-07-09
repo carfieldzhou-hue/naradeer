@@ -5,6 +5,7 @@ interface ThreeGameDiagnostics {
   elapsed: number;
   score: number;
   targetScore: number;
+  level: number;
   complete: boolean;
   feedableDeer: number;
   player: {
@@ -23,6 +24,11 @@ interface ThreeGameDiagnostics {
     width: number;
     height: number;
     dpr: number;
+  };
+  camera: {
+    position: { x: number; y: number; z: number };
+    yaw: number;
+    pitch: number;
   };
 }
 

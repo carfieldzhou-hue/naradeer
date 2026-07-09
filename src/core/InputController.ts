@@ -113,12 +113,62 @@ export class InputController {
 
   // Touch camera: window-level, start on any touch outside controls
   private readonly onWindowPointerDown = (e: PointerEvent) => {
-    const target = e.target as HTMLElement;
-    if (target && target.closest('#touch-controls')) return;
+    const target = e.target as Element | null;
+    // `closest` exists on Element but not on Text/Window/Document. Be defensive
+    // so a stray target type can't throw and silently kill the camera handler.
+    const inTouchControls =
+      target && typeof (target as Element).closest === 'function' &&
+      (target as Element).closest('#touch-controls') !== null;
+    if (inTouchControls) return;
     if (this.touchCamId !== null) return;
     this.touchCamId = e.pointerId;
     this.touchCamLastX = e.clientX;
     this.touchCamLastY = e.clientY;
+  };
+
+  // Some mobile browsers (notably old WeChat X5 / older Android Chromium) only
+  // emit `touchstart`/`touchmove` for the first finger and never synthesize
+  // PointerEvents. Provide a parallel path that tracks the *first* finger
+  // anywhere on screen, mirroring the PointerEvent handler above.
+  private touchOnlyCamId: number | null = null;
+  private touchOnlyLastX = 0;
+  private touchOnlyLastY = 0;
+  private readonly isInTouchControls = (clientX: number, clientY: number): boolean => {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return false;
+    const close = (el as Element).closest?.bind(el) as ((s: string) => Element | null) | undefined;
+    return typeof close === 'function' ? close('#touch-controls') !== null : false;
+  };
+  private readonly onWindowTouchStart = (e: TouchEvent) => {
+    if (this.touchCamId !== null || this.touchOnlyCamId !== null) return;
+    if (!e.touches || e.touches.length === 0) return;
+    const t = e.touches[0];
+    if (this.isInTouchControls(t.clientX, t.clientY)) return;
+    this.touchOnlyCamId = t.identifier;
+    this.touchOnlyLastX = t.clientX;
+    this.touchOnlyLastY = t.clientY;
+  };
+  private readonly onWindowTouchMoveOnly = (e: TouchEvent) => {
+    if (this.touchOnlyCamId === null) return;
+    for (let i = 0; i < e.touches.length; i++) {
+      const t = e.touches[i];
+      if (t.identifier !== this.touchOnlyCamId) continue;
+      const dx = t.clientX - this.touchOnlyLastX;
+      const dy = t.clientY - this.touchOnlyLastY;
+      this.cameraYaw -= dx * 0.005;
+      this.cameraPitch = Math.max(0.1, Math.min(1.2, this.cameraPitch - dy * 0.005));
+      this.touchOnlyLastX = t.clientX;
+      this.touchOnlyLastY = t.clientY;
+      break;
+    }
+  };
+  private readonly onWindowTouchEndOnly = (e: TouchEvent) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === this.touchOnlyCamId) {
+        this.touchOnlyCamId = null;
+        return;
+      }
+    }
   };
 
   private cameraMove(clientX: number, clientY: number): void {
@@ -190,6 +240,13 @@ export class InputController {
     window.addEventListener('touchmove', this.onWindowTouchMove, { passive: true });
     window.addEventListener('touchend', this.onWindowTouchEnd, { passive: true });
     window.addEventListener('touchcancel', this.onWindowTouchEnd, { passive: true });
+
+    // Fallback for browsers that don't synthesize PointerEvents (older WeChat
+    // X5, some Android WebViews). Use touch events directly for camera drag.
+    window.addEventListener('touchstart', this.onWindowTouchStart, { passive: true });
+    window.addEventListener('touchmove', this.onWindowTouchMoveOnly, { passive: true });
+    window.addEventListener('touchend', this.onWindowTouchEndOnly, { passive: true });
+    window.addEventListener('touchcancel', this.onWindowTouchEndOnly, { passive: true });
   }
 
   getCameraYaw(): number {

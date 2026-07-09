@@ -109,8 +109,18 @@ export class Hud {
     }
 
     const journalHint = this.getElement('#journal-hint');
-    if (!complete && collectedCount !== undefined && collectedCount > 0 && journalHint) {
+    // Touch-only devices have no Tab key, so always show the journal hint
+    // entry. Desktop users still get the same chip once they've collected at
+    // least one deer (matches the original "reward loop" intent).
+    const isTouchOnly = 'ontouchstart' in window && !matchMedia('(pointer: fine)').matches;
+    const shouldShowHint =
+      !!journalHint &&
+      !complete &&
+      (isTouchOnly || (collectedCount !== undefined && collectedCount > 0));
+    if (shouldShowHint) {
       journalHint.classList.remove('hidden');
+    } else if (journalHint) {
+      journalHint.classList.add('hidden');
     }
   }
 

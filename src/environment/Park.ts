@@ -12,6 +12,7 @@ export interface MoneyTreeInfo {
   position: THREE.Vector3;
   moneyValue: number;
   sprite: THREE.Sprite;
+  collected: boolean;
 }
 
 export interface WaterZone {
@@ -648,7 +649,7 @@ export class Park {
       sprite.position.copy(pos);
       this.group.add(sprite);
 
-      results.push({ group: g, position: pos, moneyValue: moneyValues[i], sprite });
+      results.push({ group: g, position: pos, moneyValue: moneyValues[i], sprite, collected: false });
     }
     return results;
   }

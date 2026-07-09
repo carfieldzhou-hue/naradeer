@@ -238,8 +238,18 @@ body {
   transition: opacity 0.6s ease;
 }
 
+/* Without this, the full-screen completion overlay (invisible via opacity:0
+   but still layout-present at z-index:20) was eating every pointer event
+   in the game — share button, journal hint, camera swipe, all of them.
+   The "hidden" class is also applied when the player hasn't finished a
+   level, so it must be a real "I am not in the DOM" state, not a fade. */
+#completion-overlay.hidden {
+  display: none !important;
+}
+
 #completion-overlay.show {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .completion-card {
@@ -381,7 +391,8 @@ body {
 /* ===== Share Button ===== */
 .share-btn {
   position: absolute;
-  top: 80px;
+  /* Push below the HUD (hud-top + status + journal-hint), so it never overlaps them. */
+  top: max(140px, calc(10px + 55px + 28px + 24px + 38px));
   right: 12px;
   padding: 8px 14px;
   background: rgba(255, 215, 0, 0.2);
@@ -394,6 +405,7 @@ body {
   z-index: 15;
   backdrop-filter: blur(4px);
   transition: background 0.2s, transform 0.15s;
+  pointer-events: auto;
 }
 
 .share-btn:hover {
@@ -402,35 +414,40 @@ body {
 }
 
 /* ===== Orientation Overlay ===== */
+/* Soft suggestion only: a small non-blocking banner. We no longer hide the
+   game when the player is in landscape — many users prefer landscape for
+   the wider view, and the previous full-screen overlay was swallowing every
+   pointer event (share, journal, feed, joystick, start button). */
 #orientation-overlay {
   position: absolute;
-  inset: 0;
   display: none;
+  bottom: max(160px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 12;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.8);
-  z-index: 50;
-  flex-direction: column;
-  gap: 16px;
+  gap: 8px;
   text-align: center;
-  padding: 32px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
 }
 #orientation-overlay .rotate-icon {
-  font-size: 4rem;
+  font-size: 1.2rem;
   animation: rotateHint 2s ease-in-out infinite;
 }
 #orientation-overlay p {
-  font-size: 1.1rem;
+  font-size: 0.8rem;
   opacity: 0.85;
-  max-width: 280px;
-  line-height: 1.5;
+  margin: 0;
+  line-height: 1.3;
 }
 @keyframes rotateHint {
   0%, 100% { transform: rotate(0deg); }
   50% { transform: rotate(90deg); }
-}
-@media (orientation: landscape) and (pointer: coarse) {
-  #orientation-overlay { display: flex; }
 }
 
 /* ===== Touch Controls (One-handed) ===== */
@@ -637,6 +654,24 @@ body {
 #journal-hint.hidden {
   display: none;
 }
+/* When the journal hint is wired up as a clickable target (see setupJournalInput in Game.ts)
+   give it a real touch area and pointer affordance. */
+#journal-hint.journal-hint-clickable {
+  pointer-events: auto;
+  cursor: pointer;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+#journal-hint.journal-hint-clickable:hover,
+#journal-hint.journal-hint-clickable:active {
+  background: rgba(255, 213, 79, 0.12);
+  border-color: rgba(255, 213, 79, 0.35);
+  opacity: 1;
+}
 
 /* ===== Title Overlay ===== */
 #title-overlay {
@@ -654,6 +689,18 @@ body {
 #title-overlay.hidden {
   opacity: 0;
   pointer-events: none;
+}
+
+/* ===== Global hidden fallback =====
+   A few overlays (notably #completion-overlay) used opacity:0 + a "hidden"
+   class to fade out. That class had no CSS rule, so the element kept
+   receiving pointer events at z-index:20 — which silently ate every tap
+   across the whole canvas. This global rule keeps "hidden" meaning hidden
+   for overlays that opt-in (data-hide-on-hidden="1"), even if a per-element
+   rule was missed. Elements that need a fade-out transition opt out by
+   NOT carrying the data attribute. */
+[data-hide-on-hidden].hidden:not([class*="show"]) {
+  display: none !important;
 }
 
 .title-card {
@@ -894,4 +941,82 @@ body {
   .title-card h1 {
     font-size: 1.6rem;
   }
+}
+
+/* ===== Share Guide Card (WeChat/QQ in-app browser fallback) =====
+   The built-in browsers in WeChat and QQ expose `navigator.share` as a stub
+   function, so calling it does nothing visible. Instead we pop this card
+   that walks the user through tapping the browser's own share button. */
+#share-guide-card {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#share-guide-card .share-guide-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+#share-guide-card .share-guide-panel {
+  position: relative;
+  z-index: 1;
+  max-width: 360px;
+  width: calc(100% - 40px);
+  background: rgba(28, 24, 22, 0.96);
+  border: 1px solid rgba(255, 213, 79, 0.35);
+  border-radius: 14px;
+  padding: 22px 22px 18px;
+  color: #f6f1df;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  animation: shareGuideIn 0.32s ease-out;
+}
+@keyframes shareGuideIn {
+  from { transform: translateY(20px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+#share-guide-card h3 {
+  margin: 0 0 14px;
+  font-size: 1.15rem;
+  text-align: center;
+  color: #ffd54f;
+}
+#share-guide-card ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+#share-guide-card ol li {
+  margin-bottom: 4px;
+}
+#share-guide-card .share-guide-link {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  color: #ffd54f;
+  word-break: break-all;
+  margin: 0 0 14px;
+  max-height: 70px;
+  overflow: auto;
+}
+#share-guide-card .share-guide-close {
+  display: block;
+  width: 100%;
+  padding: 10px 0;
+  background: #ffd54f;
+  color: #1c1816;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+#share-guide-card .share-guide-close:active {
+  transform: scale(0.98);
 }

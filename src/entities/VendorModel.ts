@@ -18,8 +18,22 @@ let metalMap: THREE.Texture | null = null;
 
 const texLoader = new THREE.TextureLoader();
 
+export interface LoadProgress { fraction: number; }
+type ProgressCb = (p: LoadProgress) => void;
+const progressListeners: ProgressCb[] = [];
+
+export function onLoadProgress(cb: ProgressCb): () => void {
+  progressListeners.push(cb);
+  return () => { const i = progressListeners.indexOf(cb); if (i >= 0) progressListeners.splice(i, 1); };
+}
+
+function notify(fraction: number): void {
+  for (const cb of progressListeners) cb({ fraction });
+}
+
 export async function loadVendorTemplate(): Promise<void> {
   if (template) return;
+  notify(0);
 
   // Try to load textures
   try {
@@ -29,8 +43,10 @@ export async function loadVendorTemplate(): Promise<void> {
       texLoader.loadAsync(texMetallicUrl),
     ]);
     texturesLoaded = true;
+    notify(0.3);
   } catch (err) {
     console.warn('[VendorModel] Textures failed to load, using solid color');
+    notify(0.3);
   }
 
   // Load FBX with a manager that suppresses internal texture requests
@@ -42,6 +58,7 @@ export async function loadVendorTemplate(): Promise<void> {
     return url;
   });
 
+  notify(0.5);
   const fbxLoader = new FBXLoader(manager);
   const fbxGroup = await fbxLoader.loadAsync(fbxUrl);
 
@@ -68,6 +85,7 @@ export async function loadVendorTemplate(): Promise<void> {
   });
 
   template = fbxGroup;
+  notify(1);
   console.log(`[VendorModel] loaded template`);
 }
 

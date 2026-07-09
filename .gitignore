@@ -4,3 +4,6 @@ test-results/
 artifacts/
 *.log
 .DS_Store
+
+# Custom deploy directory (鹿按鹿游戏 website)
+dist-deer-game/

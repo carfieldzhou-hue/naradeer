@@ -589,26 +589,114 @@ export class Game {
   }
 
   doShare(): void {
-    if (this.shareUsedThisLevel || this.levelComplete) return;
+    if (this.levelComplete) {
+      this.hud.showToast('请在关卡未完成时分享哦 🦌');
+      return;
+    }
+    if (this.shareUsedThisLevel) {
+      this.hud.showToast('本关已分享过啦，等下一关再试～');
+      return;
+    }
     const url = window.location.href;
     const text = '来奈良公园喂鹿吧！我正在挑战第 ' + this.currentLevel + ' 关！\n' + url;
 
-    // 手机端优先 Web Share API（原生分享面板，体验最好）
-    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    // 1) Try the Web Share API (works in mobile Safari, modern Chrome, and
+    //    in-app browsers that surface it — but NOT in WeChat's X5/QQ browser
+    //    where `navigator.share` may exist yet be a no-op).
+    if (this.canUseWebShare()) {
       this.hud.showToast('正在准备分享…');
-      navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url })
+      // Use a generous timeout — some Android browsers pop the sheet slowly.
+      const sharePromise = navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('share-timeout')), 4000),
+      );
+      Promise.race([sharePromise, timeout])
         .then(() => {
           this.rewardShare();
           this.hud.showToast('分享成功！获得 100 円 🎉');
         })
         .catch(() => {
-          this.doClipboardShare(text);
+          // User cancelled OR the API was a no-op (e.g. WeChat X5) — fall back
+          // to the in-app guide that points to the browser's share menu.
+          this.showShareGuide(text);
         });
       return;
     }
 
-    // 桌面端直接复制链接
+    // 2) Desktop / no Web Share API — copy link to clipboard and reward.
     this.doClipboardShare(text);
+  }
+
+  /**
+   * True only when navigator.share is a real, working share function. WeChat's
+   * built-in X5 browser exposes `navigator.share` as a property sometimes, but
+   * calling it does nothing — so we also require the share function to look
+   * like a function reference (not a no-op stub) and a modern mobile UA.
+   */
+  private canUseWebShare(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const share = (navigator as Navigator & { share?: unknown }).share;
+    if (typeof share !== 'function') return false;
+    const ua = navigator.userAgent || '';
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(ua);
+    if (!isMobile) return false;
+    // X5 / QQ browsers expose a stub navigator.share. Detect them by their
+    // own markers and bail out so we show the manual-share guide instead.
+    if (/MicroMessenger|QQ\//.test(ua)) return false;
+    return true;
+  }
+
+  /**
+   * WeChat/QQ in-app browsers have no Web Share API and `navigator.clipboard`
+   * is generally blocked. We can't programmatically open the share sheet, so
+   * we show a clear, persistent guide pointing the user at the browser's
+   * built-in share button.
+   */
+  private showShareGuide(text: string): void {
+    // Copy the link first if we can — most users will paste it into WeChat
+    // chat manually, and a clipboard pre-fill saves them typing.
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => undefined);
+    }
+    // Show a long-lived toast with concrete instructions.
+    this.hud.showToast('点击右上角 ··· → 分享到朋友 / 朋友圈', 5000);
+    // Also open an in-page guide card that explains what to do.
+    this.openShareGuideCard(text);
+  }
+
+  private openShareGuideCard(text: string): void {
+    const existing = document.getElementById('share-guide-card');
+    if (existing) {
+      existing.classList.remove('hidden');
+      return;
+    }
+    const card = document.createElement('div');
+    card.id = 'share-guide-card';
+    card.setAttribute('data-hide-on-hidden', '1');
+    card.innerHTML = `
+      <div class="share-guide-backdrop"></div>
+      <div class="share-guide-panel" role="dialog" aria-label="分享指引">
+        <h3>🦌 把奈良公园分享给好友</h3>
+        <ol>
+          <li>点击右上角 <b>···</b> 按钮</li>
+          <li>选择 <b>分享到朋友</b> 或 <b>分享到朋友圈</b></li>
+          <li>链接已自动复制，直接发送即可</li>
+        </ol>
+        <p class="share-guide-link" id="share-guide-link"></p>
+        <button class="share-guide-close" type="button">知道了</button>
+      </div>
+    `;
+    document.body.appendChild(card);
+    const linkEl = card.querySelector('#share-guide-link') as HTMLElement | null;
+    if (linkEl) {
+      const short = text.length > 90 ? text.slice(0, 87) + '…' : text;
+      linkEl.textContent = short;
+    }
+    const close = () => {
+      card.classList.add('hidden');
+    };
+    card.querySelector('.share-guide-close')?.addEventListener('click', close);
+    card.querySelector('.share-guide-backdrop')?.addEventListener('click', close);
   }
 
   private doClipboardShare(text: string): void {
@@ -629,16 +717,26 @@ export class Game {
     textarea.value = text;
     textarea.style.position = 'fixed';
     textarea.style.opacity = '0';
+    textarea.style.top = '0';
+    textarea.style.left = '0';
     document.body.appendChild(textarea);
+    textarea.focus();
     textarea.select();
+    let copied = false;
     try {
-      document.execCommand('copy');
-      this.rewardShare();
-      this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
+      copied = document.execCommand('copy');
     } catch {
-      this.hud.showToast('复制失败，请手动分享此页面 🙏');
+      copied = false;
     }
     document.body.removeChild(textarea);
+    if (copied) {
+      this.rewardShare();
+      this.hud.showToast('链接已复制！分享给好友获得 100 円 🎉');
+    } else {
+      // Final fallback: show the text in a toast so the user can copy it manually.
+      const short = text.length > 80 ? text.slice(0, 77) + '…' : text;
+      this.hud.showToast('请手动复制：' + short, 5000);
+    }
   }
 
   doCompletionShare(): void {
@@ -653,12 +751,19 @@ export class Game {
       this.hud.showToast('分享成功！下一关开始自动获得 100 円 🎉');
     };
 
-    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+    if (this.canUseWebShare()) {
       this.hud.showToast('正在准备分享…');
-      navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url })
+      const sharePromise = navigator.share({ title: '奈良公园 - 喂鹿游戏', text, url });
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('share-timeout')), 4000),
+      );
+      Promise.race([sharePromise, timeout])
         .then(onSuccess)
         .catch(() => {
-          this.doCompletionClipboardShare(text, onSuccess);
+          // WeChat/X5 in-app browser — show the manual share guide but still
+          // reward the player for attempting the share.
+          this.showShareGuide(text);
+          onSuccess();
         });
       return;
     }
@@ -726,12 +831,15 @@ export class Game {
 
   private setupShareButton(): void {
     const btn = document.getElementById('share-button');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        this.audio.uiClick();
-        this.doShare();
-      });
-    }
+    if (!btn) return;
+    // The button is already wired in main.ts so it works during the loading
+    // phase — bail if so to avoid duplicate handlers.
+    if (btn.dataset.wired === '1') return;
+    btn.dataset.wired = '1';
+    btn.addEventListener('click', () => {
+      this.audio.uiClick();
+      this.doShare();
+    });
   }
 
   private setupJournalInput(): void {
@@ -741,6 +849,24 @@ export class Game {
         this.journal.toggle();
       }
     });
+    // Mobile users have no Tab key — wire the journal hint chip in the HUD
+    // so tapping it opens/closes the collection journal. The hint is already
+    // wired in main.ts so it works during the loading phase; bail here if
+    // it has been wired to avoid duplicate handlers.
+    const hint = document.getElementById('journal-hint');
+    if (hint && !hint.classList.contains('journal-hint-clickable')) {
+      hint.classList.add('journal-hint-clickable');
+      hint.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.audio.uiClick();
+        this.journal.toggle();
+      });
+      hint.addEventListener('pointerdown', (e) => {
+        // Prevent the click from also reaching the canvas/camera handler.
+        e.stopPropagation();
+      });
+    }
   }
 
   private doFeed(deer: Deer): void {
@@ -919,6 +1045,15 @@ export class Game {
         width: this.canvas.width,
         height: this.canvas.height,
         dpr: Math.min(window.devicePixelRatio || 1, this.tuning.maxDpr),
+      },
+      camera: {
+        position: {
+          x: this.camera.position.x,
+          y: this.camera.position.y,
+          z: this.camera.position.z,
+        },
+        yaw: this.input.getCameraYaw(),
+        pitch: this.input.getCameraPitch(),
       },
     };
   }
