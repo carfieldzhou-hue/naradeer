@@ -1,16 +1,18 @@
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 
-import fbxUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_model_Animation_Walking_withSkin.fbx?url';
-import texBaseUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0.png?url';
-import texRoughnessUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_roughness.png?url';
-import texMetallicUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_metallic.png?url';
+import glbUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_model_Animation_Walking_withSkin.glb?url';
+import texBaseUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0.webp?url';
+import texRoughnessUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_roughness.webp?url';
+import texMetallicUrl from '../../asset/Meshy_quadruped/Meshy_AI_Whispering_Fawn_quadruped_texture_0_metallic.webp?url';
+
+import { loadGltfWithProgress, loadTextureWithProgress, type AssetProgress } from '../utils/assets';
 
 let template: THREE.Group | null = null;
 let templateClips: THREE.AnimationClip[] = [];
 
-const fbxLoader = new FBXLoader();
+const gltfLoader = new GLTFLoader();
 const texLoader = new THREE.TextureLoader();
 
 export interface LoadProgress { fraction: number; }
@@ -26,8 +28,18 @@ function notify(fraction: number): void {
   for (const cb of progressListeners) cb({ fraction });
 }
 
-export function getAnimationClips(): THREE.AnimationClip[] {
-  return templateClips;
+// Total weight of the 4 sub-assets: 3 textures (small) + 1 GLB (big).
+// Textures share 30% of the bar, GLB 70% — that matches where the bytes are.
+const TEXTURES_TOTAL_WEIGHT = 0.30;
+const GLB_WEIGHT = 0.70;
+
+function clamp01(n: number): number { return Math.max(0, Math.min(1, n)); }
+
+/** Convert a single sub-asset's bytes-progress into the global fraction
+ *  (0..1) considering only that sub-asset's share of the whole bar. */
+function subProgress(p: AssetProgress, subTotalWeight: number): number {
+  if (p.total <= 0) return 0;
+  return clamp01(p.loaded / p.total) * subTotalWeight;
 }
 
 export async function loadDeerTemplate(): Promise<void> {
@@ -35,17 +47,30 @@ export async function loadDeerTemplate(): Promise<void> {
 
   notify(0);
 
+  // ---- Textures (each contributes ~10% of the bar) ----
+  const texBaseProg = (p: AssetProgress) =>
+    notify(subProgress(p, TEXTURES_TOTAL_WEIGHT / 3));
+  const texRoughProg = (p: AssetProgress) =>
+    notify(subProgress(p, TEXTURES_TOTAL_WEIGHT / 3) + TEXTURES_TOTAL_WEIGHT / 3);
+  const texMetalProg = (p: AssetProgress) =>
+    notify(subProgress(p, TEXTURES_TOTAL_WEIGHT / 3) + (TEXTURES_TOTAL_WEIGHT / 3) * 2);
+
   const [baseMap, roughMap, metalMap] = await Promise.all([
-    texLoader.loadAsync(texBaseUrl),
-    texLoader.loadAsync(texRoughnessUrl),
-    texLoader.loadAsync(texMetallicUrl),
+    loadTextureWithProgress(texBaseUrl, texLoader, texBaseProg),
+    loadTextureWithProgress(texRoughnessUrl, texLoader, texRoughProg),
+    loadTextureWithProgress(texMetallicUrl, texLoader, texMetalProg),
   ]);
-  notify(0.3);
+  notify(TEXTURES_TOTAL_WEIGHT);
 
-  const fbxGroup = await fbxLoader.loadAsync(fbxUrl);
-  notify(0.8);
+  // ---- GLB (the big one: ~70% of the bar) ----
+  // Was FBX before 2026-07-10; switched to GLB because GLB parses in <100 ms
+  // vs FBX's 2-5 s, eliminating the main-thread freeze on click.
+  const glbProg = (p: AssetProgress) =>
+    notify(TEXTURES_TOTAL_WEIGHT + subProgress(p, GLB_WEIGHT));
+  const gltf = await loadGltfWithProgress(glbUrl, gltfLoader, glbProg);
+  const glbGroup = gltf.scene as THREE.Group;
 
-  fbxGroup.traverse((child: THREE.Object3D) => {
+  glbGroup.traverse((child: THREE.Object3D) => {
     if (child instanceof THREE.Mesh) {
       child.material = new THREE.MeshStandardMaterial({
         map: baseMap,
@@ -61,8 +86,8 @@ export async function loadDeerTemplate(): Promise<void> {
     }
   });
 
-  template = fbxGroup;
-  templateClips = fbxGroup.animations ?? [];
+  template = glbGroup;
+  templateClips = gltf.animations ?? [];
 
   console.log(`[DeerModel] loaded ${templateClips.length} clips`);
   notify(1);
@@ -88,4 +113,8 @@ export function cloneDeerTemplate(): THREE.Group {
   });
 
   return clone;
+}
+
+export function getAnimationClips(): THREE.AnimationClip[] {
+  return templateClips;
 }

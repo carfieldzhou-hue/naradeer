@@ -82,10 +82,45 @@ const updateLoadLabel = (): void => {
   startBtn!.textContent = `加载中… ${pct}%`;
 };
 
+// Start loading immediately on page load (before the user clicks anything),
+// so by the time the player reads the title screen and hits 开始, both FBX
+// models + their textures are already in the browser cache. Previously the
+// 23 MB of FBX + PNG only started downloading AFTER the click — that was the
+// '点击开始很久都 0%' bug. Now the title screen shows real progress and the
+// click is effectively instant.
+const offDeerEarly = onDeerLoadProgress(({ fraction }) => {
+  deerFraction = fraction;
+  updateLoadLabel();
+});
+const offVendorEarly = onVendorLoadProgress(({ fraction }) => {
+  vendorFraction = fraction;
+  updateLoadLabel();
+});
+startBtn!.textContent = '加载中… 0%';
+
+let preloadPromise: Promise<void> | null = null;
+function preload(): Promise<void> {
+  if (!preloadPromise) {
+    preloadPromise = Promise.all([loadDeerTemplate(), loadVendorTemplate()])
+      .then(() => undefined)
+      .catch((err) => {
+        // Reset so a click can retry
+        preloadPromise = null;
+        throw err;
+      });
+  }
+  return preloadPromise;
+}
+// Kick off the preload now (don't await — let it run in background).
+preload().catch((err) => {
+  console.error('Preload failed:', err);
+  startBtn!.textContent = '重试';
+});
+
 async function startGame(): Promise<void> {
   if (starting) return;
   starting = true;
-  startBtn!.textContent = '加载中… 0%';
+  // Subscribe to current progress (in case preload already finished).
   const offDeer = onDeerLoadProgress(({ fraction }) => {
     deerFraction = fraction;
     updateLoadLabel();
@@ -95,7 +130,7 @@ async function startGame(): Promise<void> {
     updateLoadLabel();
   });
   try {
-    await Promise.all([loadDeerTemplate(), loadVendorTemplate()]);
+    await preload();
     if (game) game.dispose();
     game = new Game(canvasEl!);
     game.start();
@@ -108,6 +143,8 @@ async function startGame(): Promise<void> {
   } finally {
     offDeer();
     offVendor();
+    offDeerEarly();
+    offVendorEarly();
     starting = false;
   }
 }
