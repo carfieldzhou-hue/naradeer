@@ -18,7 +18,9 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
-    sourcemap: true,
+    // No source maps in production — keeps the deployed bundle smaller and
+    // avoids leaking the source layout to public visitors.
+    sourcemap: false,
     chunkSizeWarningLimit: 900,
   },
 });

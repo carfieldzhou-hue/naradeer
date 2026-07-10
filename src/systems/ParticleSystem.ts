@@ -137,6 +137,13 @@ export class ParticleSystem {
     this.emitters.push(emitter);
   }
 
+  /** Rainbow burst — used when the player feeds a Legendary deer. 7 colored
+   *  waves expand outward, ~1.6s lifetime. */
+  emitRainbowBurst(position: THREE.Vector3): void {
+    const emitter = new RainbowBurstEmitter(this.scene, position);
+    this.emitters.push(emitter);
+  }
+
   private removeEmitter(index: number): void {
     const emitter = this.emitters[index];
     emitter.dispose();
@@ -349,6 +356,102 @@ class ConfettiEmitter implements Emitter {
     pos.needsUpdate = true;
 
     const fade = Math.min(this.life / 0.5, 1);
+    (this.particles.material as THREE.PointsMaterial).opacity = fade;
+  }
+
+  dispose(): void {
+    this.particles.geometry.dispose();
+    (this.particles.material as THREE.PointsMaterial).dispose();
+    this.particles.parent?.remove(this.particles);
+  }
+}
+
+/** 7 colored rings expanding outward + upward burst. Used for legendary-deer
+ *  feed payoff. Lifetime 1.6s, particles drift outward with mild gravity. */
+class RainbowBurstEmitter implements Emitter {
+  life = 1.6;
+  private readonly particles: THREE.Points;
+  private readonly velocities: Float32Array;
+  private readonly count: number;
+
+  constructor(scene: THREE.Scene, position: THREE.Vector3) {
+    // 7 rings × 8 particles per ring = 56 total
+    const RING_COUNT = 7;
+    const PER_RING = 8;
+    this.count = RING_COUNT * PER_RING;
+    const positions = new Float32Array(this.count * 3);
+    this.velocities = new Float32Array(this.count * 3);
+    const colors = new Float32Array(this.count * 3);
+    const sizes = new Float32Array(this.count);
+
+    // Rainbow palette — red, orange, yellow, green, cyan, blue, purple
+    const palette = [
+      [0xff, 0x52, 0x52],
+      [0xff, 0xa7, 0x26],
+      [0xff, 0xd5, 0x4f],
+      [0x66, 0xbb, 0x6a],
+      [0x42, 0xa5, 0xf5],
+      [0x5c, 0x6b, 0xc0],
+      [0xab, 0x47, 0xbc],
+    ];
+
+    for (let r = 0; r < RING_COUNT; r++) {
+      const [cr, cg, cb] = palette[r];
+      for (let p = 0; p < PER_RING; p++) {
+        const i = r * PER_RING + p;
+        const angle = (p / PER_RING) * Math.PI * 2;
+        // Ring r expands slightly faster → creates a "blooming" effect
+        const speed = 1.4 + r * 0.15;
+        this.velocities[i * 3] = Math.cos(angle) * speed;
+        this.velocities[i * 3 + 1] = 1.6 + Math.random() * 1.2;
+        this.velocities[i * 3 + 2] = Math.sin(angle) * speed;
+
+        positions[i * 3] = position.x + (Math.random() - 0.5) * 0.1;
+        positions[i * 3 + 1] = position.y + (Math.random() - 0.5) * 0.1;
+        positions[i * 3 + 2] = position.z + (Math.random() - 0.5) * 0.1;
+
+        colors[i * 3] = cr / 255;
+        colors[i * 3 + 1] = cg / 255;
+        colors[i * 3 + 2] = cb / 255;
+        sizes[i] = 0.07 + Math.random() * 0.04;
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.08,
+      transparent: true,
+      opacity: 1,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    this.particles = new THREE.Points(geo, mat);
+    scene.add(this.particles);
+  }
+
+  update(delta: number): void {
+    this.life -= delta;
+    const pos = this.particles.geometry.attributes.position as THREE.BufferAttribute;
+    const array = pos.array as Float32Array;
+
+    for (let i = 0; i < this.count; i++) {
+      this.velocities[i * 3 + 1] -= 2.6 * delta; // mild gravity
+      array[i * 3] += this.velocities[i * 3] * delta;
+      array[i * 3 + 1] += this.velocities[i * 3 + 1] * delta;
+      array[i * 3 + 2] += this.velocities[i * 3 + 2] * delta;
+      // Mild horizontal drag so particles don't fly forever
+      this.velocities[i * 3] *= 1 - delta * 0.6;
+      this.velocities[i * 3 + 2] *= 1 - delta * 0.6;
+    }
+    pos.needsUpdate = true;
+
+    const fade = Math.min(this.life / 0.6, 1);
     (this.particles.material as THREE.PointsMaterial).opacity = fade;
   }
 

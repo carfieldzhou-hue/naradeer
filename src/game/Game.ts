@@ -3,7 +3,7 @@ import { InputController } from '../core/InputController';
 import { Loop } from '../core/Loop';
 import { createRenderer, resizeRenderer } from '../core/Renderer';
 import { Player, type ArenaBounds } from '../entities/Player';
-import { Deer, DeerPersonality } from '../entities/Deer';
+import { Deer, DeerPersonality, DeerRarity } from '../entities/Deer';
 import { Obstacle } from '../entities/Obstacle';
 import { Vendor } from '../entities/Vendor';
 import { TreasureChest } from '../entities/TreasureChest';
@@ -428,7 +428,7 @@ export class Game {
 
     // Pre-level hint: warn about water hazards (they appear from level 2 on).
     if (level >= 2) {
-      this.hud.showToast('⚠️ 本关有水池！碰到会惊跑小鹿，绕开走更安全～', 4500);
+      this.hud.showToast('⚠️ 本关有水池！掉进去会丢失仙贝，绕开走～', 4500);
     }
   }
 
@@ -771,10 +771,12 @@ export class Game {
       return;
     }
 
-    // 2) No native Web Share (desktop Firefox/Safari, or WeChat/QQ in-app) —
-    //    pop a share panel with explicit buttons so the player always gets a
-    //    clear, tappable share affordance. The goal is to maximise sharing.
-    this.openSharePanel(text, () => this.onShareSuccess(false));
+    // 2) No native Web Share (WeChat/QQ in-app, desktop Firefox/Safari) —
+    //    count the click as the share action and immediately reward +100 円
+    //    (anti-spam via shareCooldown) and pop the manual share guide. One
+    //    tap → done. No intermediate panel.
+    this.onShareSuccess(false);
+    this.showShareGuide(text);
   }
 
   /**
@@ -847,69 +849,51 @@ export class Game {
   }
 
   /**
-   * Fallback share UI for browsers without the Web Share API (desktop
-   * Firefox/Safari) and in-app browsers (WeChat/QQ). Pops a panel with explicit
-   * share buttons so the player always gets a visible, tappable "分享按钮" —
-   * maximising share rate, which is a core retention goal. The native sheet is
-   * used directly whenever available (see doShare / doCompletionShare).
-   */
-  private openSharePanel(text: string, onSuccess: () => void): void {
-    const existing = document.getElementById('share-panel');
-    if (existing) {
-      existing.classList.remove('hidden');
-      return;
-    }
-    const panel = document.createElement('div');
-    panel.id = 'share-panel';
-    panel.setAttribute('data-hide-on-hidden', '1');
-    panel.innerHTML = `
-      <div class="share-panel-backdrop"></div>
-      <div class="share-panel" role="dialog" aria-label="分享">
-        <h3>🦌 分享奈良公园</h3>
-        <p class="share-panel-sub">话术已自动复制 ✓ 去微信粘贴给好友吧！（每次分享 +100円）</p>
-        <div class="share-panel-btns">
-          <button type="button" class="sp-btn sp-wechat">💬 去微信粘贴</button>
-        </div>
-        <button type="button" class="sp-close">关闭</button>
-      </div>
-    `;
-    document.body.appendChild(panel);
-
-    const close = () => panel.classList.add('hidden');
-    panel.querySelector('.sp-close')?.addEventListener('click', close);
-    panel.querySelector('.share-panel-backdrop')?.addEventListener('click', close);
-
-    // 打开面板即自动复制整段话术（用户点分享 = 明确分享意图），无需再点
-    // "复制"按钮。复制成功后触发对应奖励（游戏内 +100円；通关则计入下一关加成）。
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => onSuccess()).catch(() => this.fallbackShare(text));
-    } else {
-      this.fallbackShare(text);
-    }
-
-    // 微信分享 → manual guide (a plain web page can't auto-open WeChat's sheet).
-    panel.querySelector('.sp-wechat')?.addEventListener('click', () => {
-      this.showShareGuide(text);
-      close();
-    });
-  }
-
-  /**
    * WeChat/QQ in-app browsers have no Web Share API and `navigator.clipboard`
    * is generally blocked. We can't programmatically open the share sheet, so
    * we show a clear, persistent guide pointing the user at the browser's
    * built-in share button.
    */
   private showShareGuide(text: string): void {
-    // Copy the link first if we can — most users will paste it into WeChat
-    // chat manually, and a clipboard pre-fill saves them typing.
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).catch(() => undefined);
-    }
+    // Best-effort copy so the user can paste. The async clipboard API is
+    // blocked on insecure (HTTP) origins and in some in-app browsers, so fall
+    // back to a hidden textarea + execCommand('copy') which works everywhere
+    // a clipboard is reachable.
+    this.copyTextQuietly(text);
     // Show a long-lived toast with concrete instructions.
     this.hud.showToast('点击右上角 ··· → 分享到朋友 / 朋友圈', 5000);
     // Also open an in-page guide card that explains what to do.
     this.openShareGuideCard(text);
+  }
+
+  /**
+   * Try to copy `text` to the system clipboard. Returns true if anything
+   * resembling a copy likely succeeded. Used by showShareGuide so the link is
+   * pre-filled even on non-secure (HTTP) origins.
+   */
+  private copyTextQuietly(text: string): boolean {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(() => this.copyTextQuietlyExec(text));
+      return true;
+    }
+    return this.copyTextQuietlyExec(text);
+  }
+
+  /** execCommand('copy') fallback for insecure origins. */
+  private copyTextQuietlyExec(text: string): boolean {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    textarea.style.top = '0';
+    textarea.style.left = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    document.body.removeChild(textarea);
+    return ok;
   }
 
   private openShareGuideCard(text: string): void {
@@ -998,8 +982,10 @@ export class Game {
       return;
     }
 
-    // 2) No native Web Share — pop the share panel with explicit buttons.
-    this.openSharePanel(text, () => this.onShareSuccess(true));
+    // 2) No native Web Share — same one-tap path as doShare(): reward +100 円
+    //    immediately and pop the manual guide.
+    this.onShareSuccess(true);
+    this.showShareGuide(text);
   }
 
   /**
@@ -1254,6 +1240,13 @@ export class Game {
     this.particles.emitPickup(deer.group.position.clone());
     this.particles.emitConfetti(heartPos);
     this.hud.flashPickup();
+
+    // Legendary deer — extra payoff so the player *feels* the rarity.
+    if (deer.rarity === DeerRarity.Legendary) {
+      deer.triggerLegendaryFeedEffect();
+      this.particles.emitRainbowBurst(heartPos);
+      this.hud.showToast('✨ 传说之鹿！幸运加持！', 2500);
+    }
 
     setTimeout(() => {
       if (deer.isHappy()) {

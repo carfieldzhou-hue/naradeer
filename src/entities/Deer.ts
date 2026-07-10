@@ -202,6 +202,14 @@ export class Deer {
   private readonly playerVel = new THREE.Vector3();
   private goldenGlow?: THREE.Sprite;
   private butterflyWingsGroup?: THREE.Group;
+  /** Legendary-only: a small group of colored cloud sprites orbiting the
+   *  deer in 3D space. Updated every frame via updateLegendaryAura(). */
+  private legendaryAura?: THREE.Group;
+  private legendaryAuraAngle = 0;
+  /** Legendary-only: a short-lived expanding golden ring spawned when the
+   *  player feeds this legendary deer. Lives on deer.group. */
+  private legendaryFeedRing?: THREE.Sprite;
+  private legendaryFeedRingLife = 0;
 
   constructor(index: number, position: THREE.Vector3, tuning?: Partial<DeerTuning>) {
     this.index = index;
@@ -285,7 +293,7 @@ export class Deer {
   }
 
   private applyVisualStyle(): void {
-    // Color palette by personality
+    // Color palette by personality (only used as the base tint for Common deer)
     const PERSONALITY_COLORS: Record<string, { tint: string; emissive?: string; emissiveIntensity?: number }> = {
       [DeerPersonality.Gentle]:    { tint: '#ffffff' },
       [DeerPersonality.Shy]:       { tint: '#e8d4f0' },
@@ -294,26 +302,31 @@ export class Deer {
       [DeerPersonality.Aggressive]:{ tint: '#ffcdd2' },
     };
 
-    // Rarity glow colors
-    const RARITY_GLOW: Record<string, { color: string; intensity: number }> = {
-      [DeerRarity.Common]:    { color: '#000000', intensity: 0 },
-      [DeerRarity.Uncommon]:  { color: '#4fc3f7', intensity: 0.08 },  // Light blue
-      [DeerRarity.Rare]:      { color: '#ba68c8', intensity: 0.12 },  // Purple
-      [DeerRarity.Legendary]: { color: '#ffd54f', intensity: 0.18 },  // Gold
+    // Rarity body tint — overrides personality for non-common rarities so
+    // the player can read the rarity at a glance. Also drives emissive glow.
+    const RARITY_TINT: Record<string, { tint: string; emissive: string; intensity: number }> = {
+      [DeerRarity.Common]:    { tint: '#ffffff', emissive: '#000000', intensity: 0 },          // natural deer
+      [DeerRarity.Uncommon]:  { tint: '#9bd5ff', emissive: '#4fc3f7', intensity: 0.15 },       // light blue
+      [DeerRarity.Rare]:      { tint: '#d4a5ff', emissive: '#ba68c8', intensity: 0.22 },       // purple
+      [DeerRarity.Legendary]: { tint: '#ffe066', emissive: '#ffd54f', intensity: 0.32 },       // gold
     };
 
     const personalityStyle = PERSONALITY_COLORS[this.personality] ?? PERSONALITY_COLORS[DeerPersonality.Gentle];
-    const rarityStyle = RARITY_GLOW[this.rarity] ?? RARITY_GLOW[DeerRarity.Common];
+    const rarityStyle = RARITY_TINT[this.rarity] ?? RARITY_TINT[DeerRarity.Common];
+
+    // Common deer keep their personality tint (warmer, more natural look).
+    // Uncommon / Rare / Legendary get the rarity tint so they read clearly.
+    const bodyTint = this.rarity === DeerRarity.Common ? personalityStyle.tint : rarityStyle.tint;
 
     // Apply color tint and emissive to all meshes
     this.modelRoot.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const mat = child.material as THREE.MeshStandardMaterial;
-        mat.color = new THREE.Color(personalityStyle.tint);
+        mat.color = new THREE.Color(bodyTint);
 
         // Add emissive glow for rarity
         if (rarityStyle.intensity > 0) {
-          mat.emissive = new THREE.Color(rarityStyle.color);
+          mat.emissive = new THREE.Color(rarityStyle.emissive);
           mat.emissiveIntensity = rarityStyle.intensity;
         }
       }
@@ -326,7 +339,7 @@ export class Deer {
       glowCanvas.height = 128;
       const ctx = glowCanvas.getContext('2d')!;
       const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-      const glowColor = rarityStyle.color;
+      const glowColor = rarityStyle.emissive;
       gradient.addColorStop(0, `${glowColor}59`);   // 35% opacity
       gradient.addColorStop(0.3, `${glowColor}1f`); // 12% opacity
       gradient.addColorStop(1, `${glowColor}00`);   // 0% opacity
@@ -336,7 +349,7 @@ export class Deer {
       const glow = new THREE.Sprite(
         new THREE.SpriteMaterial({ map: glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
       );
-      const glowScale = this.rarity === DeerRarity.Legendary ? 2.2 : this.rarity === DeerRarity.Rare ? 1.8 : 1.4;
+      const glowScale = this.rarity === DeerRarity.Legendary ? 2.6 : this.rarity === DeerRarity.Rare ? 2.0 : 1.5;
       glow.scale.set(glowScale * this.scaleFactor, glowScale * this.scaleFactor, 1);
       glow.position.y = 0.02;
       this.goldenGlow = glow; // Reuse field for disposal
@@ -389,6 +402,40 @@ export class Deer {
       this.butterflyWingsGroup.position.set(0, 0.55 * this.scaleFactor, -0.05 * this.scaleFactor);
       this.group.add(this.butterflyWingsGroup);
     }
+
+    // Legendary-only: orbiting rainbow-cloud aura (七彩祥云)
+    if (this.rarity === DeerRarity.Legendary) {
+      this.legendaryAura = new THREE.Group();
+      // Rainbow sequence — 7 colors is a nice 七彩 but we use 6 for symmetry.
+      const AURA_COLORS = ['#ff5252', '#ffa726', '#ffd54f', '#66bb6a', '#42a5f5', '#ab47bc'];
+      const radius = 1.15 * this.scaleFactor;
+      for (let i = 0; i < AURA_COLORS.length; i++) {
+        const c = document.createElement('canvas');
+        c.width = 96; c.height = 96;
+        const cx = c.getContext('2d')!;
+        const grad = cx.createRadialGradient(48, 48, 0, 48, 48, 48);
+        grad.addColorStop(0, AURA_COLORS[i] + 'cc');  // 80%
+        grad.addColorStop(0.4, AURA_COLORS[i] + '55'); // ~33%
+        grad.addColorStop(1, AURA_COLORS[i] + '00');
+        cx.fillStyle = grad;
+        cx.fillRect(0, 0, 96, 96);
+        const tex = new THREE.CanvasTexture(c);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: tex,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }));
+        const baseAngle = (i / AURA_COLORS.length) * Math.PI * 2;
+        sprite.position.set(Math.cos(baseAngle) * radius, 0.35, Math.sin(baseAngle) * radius);
+        const s = 0.55 * this.scaleFactor;
+        sprite.scale.set(s, s, 1);
+        sprite.userData.baseAngle = baseAngle;
+        sprite.userData.heightOffset = (i % 2 === 0 ? 0.0 : 0.35); // half cloud higher
+        this.legendaryAura.add(sprite);
+      }
+      this.group.add(this.legendaryAura);
+    }
   }
 
   update(delta: number, playerPosition: THREE.Vector3, playerStealthed: boolean): void {
@@ -396,6 +443,10 @@ export class Deer {
     this.mixer.update(delta);
     this.playerStealthed = playerStealthed;
     if (this.whistleTimer > 0) this.whistleTimer -= delta;
+
+    // Legendary-only orbiting rainbow clouds + expanding feed ring.
+    this.updateLegendaryAura(delta);
+    this.updateLegendaryFeedRing(delta);
 
     // Control walk animation speed based on velocity
     if (this.walkAction) {
@@ -503,8 +554,10 @@ export class Deer {
     if (this.state.current === DeerState.Bow) {
       this.bowPhase += delta * 4.5;
       const dip = Math.max(0, Math.sin(this.bowPhase)); // 0..1, dip-and-rise
-      // Positive rotation.x pitches the nose (local +Z) down = a bow.
-      this.modelRoot.rotation.x = dip * 0.34;
+      // The Meshy quadruped FBX faces -Z, so POSITIVE rotation.x tips the
+      // tail down / nose UP (backward bow). Negate so the nose dips toward
+      // the ground = the natural Nara-deer cracker-begging bow.
+      this.modelRoot.rotation.x = -dip * 0.34;
     } else {
       this.modelRoot.rotation.x += (0 - this.modelRoot.rotation.x) * delta * 6;
     }
@@ -512,16 +565,19 @@ export class Deer {
     // Head tracking: look toward player when nearby, nod when happy
     if (this.headBone) {
       if (this.state.current === DeerState.Happy) {
-        // Nod animation after feeding (forward nod, not backward)
+        // Nod animation after feeding (forward nod). On this Meshy quadruped
+        // rig the head bone's local +Z axis points up out of the skull, so
+        // POSITIVE rotation.z dips the nose down = a real nod.
         const nodSpeed = 8;
         const nodAmount = 0.25;
         this.happyBob += delta * nodSpeed;
-        this.headBone.rotation.z = -Math.abs(Math.sin(this.happyBob)) * nodAmount;
+        this.headBone.rotation.z = Math.abs(Math.sin(this.happyBob)) * nodAmount;
         this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 3;
       } else if (this.state.current === DeerState.Bow) {
         // Extra head nod layered on top of the model-level bow (enhancement).
+        // Forward dip = positive rotation.z on this rig (see Happy branch).
         const dip = Math.max(0, Math.sin(this.bowPhase));
-        this.headBone.rotation.z = -0.12 - dip * 0.4;
+        this.headBone.rotation.z = 0.12 + dip * 0.4;
         this.headBone.rotation.y += (0 - this.headBone.rotation.y) * delta * 4;
         this.headBone.rotation.x += (0 - this.headBone.rotation.x) * delta * 4;
       } else if (distToPlayer < this.getDetectionRange() * 1.5) {
@@ -756,6 +812,90 @@ export class Deer {
     }
   }
 
+  /** Rotate the legendary aura (if any) so the rainbow clouds drift around
+   *  the deer. No-op for non-legendary deer. */
+  private updateLegendaryAura(delta: number): void {
+    if (!this.legendaryAura) return;
+    this.legendaryAuraAngle += delta * 0.6;
+    const radius = 1.15 * this.scaleFactor;
+    for (let i = 0; i < this.legendaryAura.children.length; i++) {
+      const cloud = this.legendaryAura.children[i] as THREE.Sprite;
+      const baseAngle = cloud.userData.baseAngle as number;
+      const heightOffset = cloud.userData.heightOffset as number;
+      const a = this.legendaryAuraAngle + baseAngle;
+      const bob = Math.sin(this.legendaryAuraAngle * 1.8 + i) * 0.12;
+      cloud.position.set(
+        Math.cos(a) * radius,
+        0.35 + heightOffset + bob,
+        Math.sin(a) * radius,
+      );
+      // Pulse opacity for a "breathing" feel
+      const mat = cloud.material as THREE.SpriteMaterial;
+      mat.opacity = 0.65 + 0.25 * Math.sin(this.legendaryAuraAngle * 2.2 + i * 0.7);
+    }
+  }
+
+  /** Tick the short-lived expanding ring that plays when a legendary deer is
+   *  fed. Auto-disposes when life hits zero. No-op for non-legendary deer. */
+  private updateLegendaryFeedRing(delta: number): void {
+    if (!this.legendaryFeedRing) return;
+    this.legendaryFeedRingLife -= delta;
+    if (this.legendaryFeedRingLife <= 0) {
+      this.group.remove(this.legendaryFeedRing);
+      this.legendaryFeedRing.material.map?.dispose();
+      this.legendaryFeedRing.material.dispose();
+      this.legendaryFeedRing = undefined;
+      return;
+    }
+    // Expand from scale 0.4 → 4.0 over the 1.2s life, fade alpha along the way.
+    const t = 1 - this.legendaryFeedRingLife / 1.2;
+    const scale = (0.4 + t * 3.6) * this.scaleFactor;
+    this.legendaryFeedRing.scale.set(scale, scale, 1);
+    this.legendaryFeedRing.position.y = 0.6 + t * 0.4;
+    const mat = this.legendaryFeedRing.material as THREE.SpriteMaterial;
+    mat.opacity = (1 - t) * 0.9;
+  }
+
+  /** Public hook: spawn the legendary feed ring + boost the aura briefly.
+   *  Called by Game.doFeed() when this deer is Legendary. */
+  triggerLegendaryFeedEffect(): void {
+    if (this.rarity !== DeerRarity.Legendary) return;
+
+    // Expanding golden ring (a soft disc sprite)
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    const cx = c.getContext('2d')!;
+    const grad = cx.createRadialGradient(64, 64, 50, 64, 64, 62);
+    grad.addColorStop(0, 'rgba(255, 215, 0, 0)');
+    grad.addColorStop(0.55, 'rgba(255, 215, 0, 0)');
+    grad.addColorStop(0.78, 'rgba(255, 235, 130, 1)');
+    grad.addColorStop(0.92, 'rgba(255, 215, 0, 0.4)');
+    grad.addColorStop(1, 'rgba(255, 215, 0, 0)');
+    cx.fillStyle = grad;
+    cx.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    this.legendaryFeedRing = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    this.legendaryFeedRing.position.y = 0.6;
+    const s0 = 0.4 * this.scaleFactor;
+    this.legendaryFeedRing.scale.set(s0, s0, 1);
+    this.legendaryFeedRingLife = 1.2;
+    this.group.add(this.legendaryFeedRing);
+
+    // Briefly boost the aura opacity so the rainbow clouds "flash" with the ring.
+    if (this.legendaryAura) {
+      for (const child of this.legendaryAura.children) {
+        const sprite = child as THREE.Sprite;
+        const mat = sprite.material as THREE.SpriteMaterial;
+        mat.opacity = Math.min(1, mat.opacity + 0.4);
+      }
+    }
+  }
+
   private updateAggressive(delta: number, playerPosition: THREE.Vector3, distToPlayer: number): void {
     if (this.aggressiveCooldown > 0) {
       this.aggressiveCooldown -= delta;
@@ -905,6 +1045,20 @@ export class Deer {
     if (this.goldenGlow) {
       this.goldenGlow.material.dispose();
       if (this.goldenGlow.material.map) this.goldenGlow.material.map.dispose();
+    }
+    if (this.legendaryAura) {
+      for (const child of this.legendaryAura.children) {
+        const sprite = child as THREE.Sprite;
+        const mat = sprite.material as THREE.SpriteMaterial;
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      }
+      this.legendaryAura = undefined;
+    }
+    if (this.legendaryFeedRing) {
+      this.legendaryFeedRing.material.map?.dispose();
+      this.legendaryFeedRing.material.dispose();
+      this.legendaryFeedRing = undefined;
     }
   }
 }

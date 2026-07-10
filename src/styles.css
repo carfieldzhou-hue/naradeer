@@ -1099,6 +1099,74 @@ body {
   .title-card h1 {
     font-size: 1.6rem;
   }
+
+  /* ---- Journal overlay: tighter layout on phones ---- */
+  .journal-panel {
+    width: min(640px, 96vw);
+    max-height: min(86vh, 700px);
+    border-radius: 14px;
+  }
+  .journal-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .journal-header h2 {
+    font-size: 1rem;
+  }
+  .journal-progress {
+    font-size: 0.75rem;
+    margin-left: auto;
+  }
+  .journal-title {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+  }
+  .journal-share-btn {
+    font-size: 0.75rem;
+    padding: 5px 10px;
+  }
+  #journal-close {
+    width: 28px;
+    height: 28px;
+    font-size: 0.9rem;
+  }
+  .journal-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .journal-card {
+    padding: 10px 6px;
+    border-radius: 8px;
+  }
+  .journal-card .deer-icon {
+    font-size: 1.5rem;
+    margin-bottom: 3px;
+  }
+  .journal-card .deer-name {
+    font-size: 0.72rem;
+    margin-bottom: 1px;
+  }
+  .journal-card .deer-rarity {
+    font-size: 0.62rem;
+    margin-bottom: 1px;
+  }
+  .journal-card .deer-rarity-label {
+    font-size: 0.58rem;
+    margin-bottom: 1px;
+  }
+  .journal-card .deer-personality {
+    font-size: 0.6rem;
+  }
+  .journal-card .deer-special {
+    font-size: 0.58rem;
+  }
+  .journal-card .deer-badge {
+    font-size: 0.55rem;
+    padding: 1px 6px;
+    margin-top: 3px;
+  }
 }
 
 /* ===== Share Guide Card (WeChat/QQ in-app browser fallback) =====
