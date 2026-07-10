@@ -866,10 +866,9 @@ export class Game {
       <div class="share-panel-backdrop"></div>
       <div class="share-panel" role="dialog" aria-label="分享">
         <h3>🦌 分享奈良公园</h3>
-        <p class="share-panel-sub">喊好友来挑战收集全图鉴！每次分享得 100 円</p>
+        <p class="share-panel-sub">话术已自动复制 ✓ 去微信粘贴给好友吧！（每次分享 +100円）</p>
         <div class="share-panel-btns">
-          <button type="button" class="sp-btn sp-copy">📋 复制整段话术</button>
-          <button type="button" class="sp-btn sp-wechat">💬 微信分享</button>
+          <button type="button" class="sp-btn sp-wechat">💬 去微信粘贴</button>
         </div>
         <button type="button" class="sp-close">关闭</button>
       </div>
@@ -880,16 +879,14 @@ export class Game {
     panel.querySelector('.sp-close')?.addEventListener('click', close);
     panel.querySelector('.share-panel-backdrop')?.addEventListener('click', close);
 
-    // 复制链接 → copy to clipboard, then fire the level-appropriate reward
-    // handler (in-level gives 100円 now; completion sets the next-level bonus).
-    panel.querySelector('.sp-copy')?.addEventListener('click', () => {
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(() => onSuccess()).catch(() => this.fallbackShare(text));
-      } else {
-        this.fallbackShare(text);
-      }
-      close();
-    });
+    // 打开面板即自动复制整段话术（用户点分享 = 明确分享意图），无需再点
+    // "复制"按钮。复制成功后触发对应奖励（游戏内 +100円；通关则计入下一关加成）。
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => onSuccess()).catch(() => this.fallbackShare(text));
+    } else {
+      this.fallbackShare(text);
+    }
+
     // 微信分享 → manual guide (a plain web page can't auto-open WeChat's sheet).
     panel.querySelector('.sp-wechat')?.addEventListener('click', () => {
       this.showShareGuide(text);
