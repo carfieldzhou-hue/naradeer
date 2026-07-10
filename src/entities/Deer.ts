@@ -223,7 +223,7 @@ export class Deer {
     this.isMale = GENDER_BY_INDEX[index] === 1;
     this.hasAntlers = ANTLERS_BY_INDEX[index];
 
-    this.scaleFactor = 0.82 + Math.random() * 0.36; // 0.82 ~ 1.18
+    this.scaleFactor = this.computeScaleFactor(this.rarity);
     // Clone FBX model and apply scale
     this.modelRoot = cloneDeerTemplate(this.scaleFactor);
     this.modelRoot.castShadow = true;
@@ -266,6 +266,26 @@ export class Deer {
 
     this.group.position.copy(position);
     this.group.rotation.y = Math.random() * Math.PI * 2;
+  }
+
+  /**
+   * Per-rarity size curve. Larger rarity = bigger deer (visual hierarchy
+   * reinforces the rarity gradient). Common is intentionally small (a tiny
+   * "starter" deer), Legendary is a full 1.5× to feel like a boss.
+   *
+   *   Common     → 0.5          (fixed, half-size herd fillers)
+   *   Uncommon   → 0.75 ~ 1.0   (random, on the small side)
+   *   Rare       → 1.0 ~ 1.25   (random, on the large side)
+   *   Legendary  → 1.5          (fixed, signature boss deer)
+   */
+  private computeScaleFactor(rarity: DeerRarity): number {
+    switch (rarity) {
+      case DeerRarity.Common: return 0.5;
+      case DeerRarity.Uncommon: return 0.75 + Math.random() * 0.25;
+      case DeerRarity.Rare: return 1.0 + Math.random() * 0.25;
+      case DeerRarity.Legendary: return 1.5;
+      default: return 0.82 + Math.random() * 0.36;
+    }
   }
 
   private findHeadBone(): THREE.Bone | null {
