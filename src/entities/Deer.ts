@@ -224,8 +224,14 @@ export class Deer {
     this.hasAntlers = ANTLERS_BY_INDEX[index];
 
     this.scaleFactor = this.computeScaleFactor(this.rarity);
-    // Clone FBX model and apply scale
-    this.modelRoot = cloneDeerTemplate(this.scaleFactor);
+    // Clone FBX model with NO per-vertex scale baking. The size variation by
+    // rarity is applied on `modelRoot.scale` (group-level) below — baking it
+    // into the geometry vertices (the old approach) broke the SkinnedMesh
+    // `bindMatrix` / skeleton math, which made the walk animation look broken
+    // on small (Common = 0.5×) deer. Group-level scale keeps the skeleton
+    // intact and step proportions visually consistent.
+    this.modelRoot = cloneDeerTemplate();
+    this.modelRoot.scale.setScalar(this.scaleFactor);
     this.modelRoot.castShadow = true;
     this.modelRoot.receiveShadow = true;
     this.group.add(this.modelRoot);

@@ -72,31 +72,20 @@ export function isDeerTemplateLoaded(): boolean {
   return template !== null;
 }
 
-export function cloneDeerTemplate(scale: number): THREE.Group {
+export function cloneDeerTemplate(): THREE.Group {
   if (!template) throw new Error('Deer template not loaded.');
 
   const clone = SkeletonUtils.clone(template) as THREE.Group;
 
-  const meshes: THREE.SkinnedMesh[] = [];
+  // SkinnedMesh bind is preserved by SkeletonUtils.clone — bones + bindMatrix
+  // + skin indices all travel with the clone. We deliberately do NOT bake a
+  // per-vertex scale here: that would invalidate the bind matrix and produce
+  // the 'tiny deer with weird walk' bug. Apply rarity size via
+  // `modelRoot.scale.setScalar(scaleFactor)` at the call site instead.
+
   clone.traverse((child: THREE.Object3D) => {
-    if (child instanceof THREE.SkinnedMesh) meshes.push(child);
+    if (child instanceof THREE.SkinnedMesh) child.frustumCulled = false;
   });
-
-  for (const m of meshes) {
-    m.geometry = m.geometry.clone();
-    const pos = m.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      pos.setXYZ(i, pos.getX(i) * scale, pos.getY(i) * scale, pos.getZ(i) * scale);
-    }
-    pos.needsUpdate = true;
-    m.geometry.computeVertexNormals();
-    m.geometry.computeBoundingBox();
-    m.geometry.computeBoundingSphere();
-    m.frustumCulled = false;
-  }
-
-  clone.updateWorldMatrix(true, true);
-  for (const m of meshes) m.bind(m.skeleton, m.bindMatrix);
 
   return clone;
 }
