@@ -33,6 +33,14 @@ interface SynthResult {
 }
 type SfxSynth = (ctx: AudioContext, dest: AudioNode) => SynthResult;
 
+/** 旋律ノート（d=音階度数[-1=間/休符], dur=拍数, oct=オクターブ, bend=oshi/meri 技法） */
+interface MelodyNote {
+  d: number;
+  dur: number;
+  oct: number;
+  bend?: number;
+}
+
 interface Voice {
   bus: AudioBus;
   priority: number; // 0 = 最高重要度
@@ -106,8 +114,37 @@ const PRIORITY: Record<string, number> = {
 // ---------------------------------------------------------------------------
 
 export class AudioSystem {
-  // 陰音階（In scale / 都節）：D, Eb, G, A, Bb, D —— 日本传统"幽玄"听感
+  // 日本伝統音階 — 複数音階を切替て反復疲労を防ぐ
+  /** 陰音階（In sen）— 暗い六音音階：D, Eb, G, A, Bb, D — レベルアップ fanfare 用 */
   private readonly IN_SEN = [293.66, 311.13, 392.0, 440.0, 466.16, 587.33];
+  /** 平調子（Hirajoshi）— 筝の基本音階：D, Eb, G, A, C, D — 治癒・探索・社交・警戒 */
+  private readonly HIRAJOSHI = [293.66, 311.13, 392.0, 440.0, 523.25, 587.33];
+  /** 呂音階（Ritsu）— 明るい五音音階：D, E, G, A, C, D — 祝賀 */
+  private readonly RITSU = [293.66, 329.63, 392.0, 440.0, 523.25, 587.33];
+
+  /** 楽句バンク — A-B-A 呼応構造、間（ma）を含む、8 拍周期 */
+  private readonly PHRASES_EXPLORE: MelodyNote[][] = [
+    [{ d: 0, dur: 1, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 1, dur: 0.5, oct: 0 }, { d: 0, dur: 1, oct: 0, bend: 0.02 }, { d: -1, dur: 1, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 2, dur: 1, oct: 0, bend: 0.015 }, { d: -1, dur: 2, oct: 0 }],
+    [{ d: 5, dur: 1, oct: 0 }, { d: 3, dur: 1, oct: 0, bend: 0.02 }, { d: 2, dur: 0.5, oct: 0 }, { d: 1, dur: 0.5, oct: 0 }, { d: 0, dur: 2, oct: 0, bend: 0.03 }, { d: -1, dur: 2, oct: 0 }],
+    [{ d: -1, dur: 1, oct: 0 }, { d: 2, dur: 1, oct: 0 }, { d: 3, dur: 1.5, oct: 0, bend: 0.03 }, { d: 4, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: -1, dur: 1, oct: 0 }, { d: 0, dur: 2, oct: 0, bend: 0.02 }],
+    [{ d: 0, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 0, dur: 0.5, oct: 0 }, { d: 1, dur: 1, oct: 0 }, { d: 0, dur: 1, oct: 0, bend: 0.02 }, { d: -1, dur: 3, oct: 0 }],
+  ];
+
+  private readonly PHRASES_SOCIAL: MelodyNote[][] = [
+    [{ d: 0, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 3, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 0, dur: 1, oct: 0 }, { d: 3, dur: 0.5, oct: 0 }, { d: 4, dur: 0.5, oct: 0 }, { d: 5, dur: 2, oct: 0, bend: 0.02 }, { d: -1, dur: 2, oct: 0 }],
+    [{ d: 5, dur: 0.5, oct: 0 }, { d: 4, dur: 0.5, oct: 0 }, { d: 3, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 1, dur: 0.5, oct: 0 }, { d: 0, dur: 2, oct: 0, bend: 0.025 }, { d: -1, dur: 2, oct: 0 }],
+    [{ d: 0, dur: 1, oct: 0 }, { d: 3, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 4, dur: 1, oct: 0, bend: 0.02 }, { d: 5, dur: 1, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: -1, dur: 2, oct: 0 }],
+  ];
+
+  private readonly PHRASES_CELEBRATE: MelodyNote[][] = [
+    [{ d: 0, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 4, dur: 0.5, oct: 0 }, { d: 5, dur: 0.5, oct: 0 }, { d: 4, dur: 0.5, oct: 0 }, { d: 3, dur: 0.5, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 0, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 0, dur: 1, oct: 0, bend: 0.02 }, { d: -1, dur: 2, oct: 0 }],
+    [{ d: 5, dur: 0.5, oct: 0 }, { d: 4, dur: 0.5, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 2, dur: 0.5, oct: 0 }, { d: 0, dur: 0.5, oct: 0 }, { d: 2, dur: 1, oct: 0 }, { d: 3, dur: 1, oct: 0 }, { d: 5, dur: 2, oct: 0, bend: 0.02 }, { d: -1, dur: 1, oct: 0 }],
+  ];
+
+  private readonly PHRASES_ALERT: MelodyNote[][] = [
+    [{ d: 0, dur: 0.5, oct: 0 }, { d: -1, dur: 0.5, oct: 0 }, { d: 0, dur: 0.5, oct: 0 }, { d: -1, dur: 0.5, oct: 0 }, { d: 1, dur: 1, oct: 0 }, { d: -1, dur: 1, oct: 0 }, { d: 0, dur: 1, oct: 0, bend: 0.03 }, { d: -1, dur: 3, oct: 0 }],
+    [{ d: 0, dur: 0.5, oct: -1 }, { d: 0, dur: 0.5, oct: 0 }, { d: 1, dur: 0.5, oct: 0 }, { d: 0, dur: 0.5, oct: 0 }, { d: -1, dur: 1, oct: 0 }, { d: 2, dur: 1, oct: 0, bend: 0.02 }, { d: -1, dur: 4, oct: 0 }],
+  ];
 
   private context: AudioContext | null = null;
   private unlocked = false;
@@ -138,7 +175,6 @@ export class AudioSystem {
   // BGM 调度句柄
   private bgmOscillators: OscillatorNode[] = [];
   private bgmInterval: number | null = null;
-  private bgmDrumTimeout: number | null = null;
   private bgmPlaying = false;
 
   // 事件合成器登记表（命名事件 → 合成器）
@@ -911,7 +947,7 @@ export class AudioSystem {
   }
 
   // -------------------------------------------------------------------------
-  // 自适应 BGM（程序化琴/尺八/太鼓 + 持续低音）
+  // 自適応 BGM — 京都伝統様式（琴/三味線/尺八/太鼓/笙 + 楽句ベース scheduling + 間）
   // -------------------------------------------------------------------------
 
   startBGM(level: number): void {
@@ -928,122 +964,307 @@ export class AudioSystem {
     this.bgmPlaying = true;
 
     const bgmGain = ctx.createGain();
-    bgmGain.gain.value = 0.5;
+    bgmGain.gain.value = 0.45;
     bgmGain.connect(this.bgmFilter);
     this.busGain.bgm = bgmGain;
 
-    const bpm = Math.min(60 + Math.floor((level - 1) / 5) * 5, 80);
+    // 京都雅楽のゆったりしたテンポ — 関所ごとに微増
+    const bpm = Math.min(48 + Math.floor((level - 1) / 5) * 3, 64);
     const beat = 60 / bpm;
-    let beatIndex = 0;
+    let phraseIdx = 0;
 
-    // 持续低音（shō 感）
-    const drone = ctx.createOscillator();
-    drone.type = 'sine';
-    drone.frequency.value = this.IN_SEN[0] / 2;
-    const droneGain = ctx.createGain();
-    droneGain.gain.value = 0.3;
-    drone.connect(droneGain);
-    droneGain.connect(bgmGain);
-    drone.start();
-    this.bgmOscillators.push(drone);
+    // 笙（shō）持続ドローン — 伝統的な和音クラスター + うなり
+    this.startShoDrone();
 
-    const schedule = (): void => {
+    const schedulePhrase = (): void => {
       if (!this.context || !this.bgmPlaying) return;
 
-      // 张力平滑
-      this.tension += (this.tensionTarget - this.tension) * 0.1;
+      // 張力 smoothing
+      this.tension += (this.tensionTarget - this.tension) * 0.08;
       const now = this.context.currentTime;
-      const t = this.tension;
+      const tn = this.tension;
 
-      // 亮度随张力下降
-      this.bgmFilter.frequency.setTargetAtTime(18000 - t * 12000, now, 0.1);
+      // 明るさ = 張力に反応（高張力で暗く）
+      this.bgmFilter.frequency.setTargetAtTime(18000 - tn * 12000, now, 0.15);
 
-      this.playKoto(now, beat, beatIndex);
-      if (this.phase === 'social' || t > 0.2) {
-        if (beatIndex % 4 === 0) this.playShakuhachi(now, beatIndex);
+      // 楽句選択 — phase に応じた bank から順次
+      const bank = this.currentPhraseBank();
+      const phrase = bank[phraseIdx % bank.length];
+
+      // 琴旋律を scheduling — 楽句の各ノートを先行スケジュール
+      let beatOffset = 0;
+      for (const note of phrase) {
+        if (note.d >= 0) {
+          this.playKotoNote(now + beatOffset * beat, this.noteFreq(note.d, note.oct), note.dur * beat, note.bend ?? 0);
+        }
+        beatOffset += note.dur;
       }
-      if (this.phase === 'alert' || t > 0.35) {
-        if (beatIndex % 2 === 0) this.playTaiko(now);
+
+      // 三味線の呼応 — social/celebrate で奇数番目の楽句後に応答フレーズ
+      if ((this.phase === 'social' || this.phase === 'celebrate') && phraseIdx % 2 === 1) {
+        const response = bank[(phraseIdx + 1) % bank.length];
+        let respOffset = 0;
+        for (const note of response) {
+          if (note.d >= 0) {
+            this.playShamisenNote(now + respOffset * beat, this.noteFreq(note.d, note.oct + 1), note.dur * beat);
+          }
+          respOffset += note.dur;
+        }
       }
 
-      beatIndex++;
-      this.bgmInterval = window.setTimeout(schedule, beat * 1000);
+      // 太鼓 — alert / 高張力で拍点に配置
+      if (this.phase === 'alert' || tn > 0.35) {
+        this.playTaiko(now);
+        this.playTaiko(now + 4 * beat);
+        if (tn > 0.6) {
+          this.playTaiko(now + 2 * beat);
+          this.playTaiko(now + 6 * beat);
+        }
+      }
+
+      // 尺八 — 偶発的・表現的な間奏（explore/social で確率発生）
+      if ((this.phase === 'explore' || this.phase === 'social') && Math.random() < 0.35) {
+        const scale = this.currentScale;
+        const noteIdx = 2 + Math.floor(Math.random() * 3);
+        this.playShakuhachiNote(now + (beatOffset + 1) * beat, scale[noteIdx], beat * 3);
+        beatOffset += 4;
+      }
+
+      // 次の楽句までの間（ma）— 2 拍の呼吸
+      phraseIdx++;
+      const totalBeats = beatOffset + 2;
+      this.bgmInterval = window.setTimeout(schedulePhrase, totalBeats * beat * 1000);
     };
-    schedule();
+    schedulePhrase();
   }
 
-  private playKoto(now: number, beat: number, beatIndex: number): void {
-    const ctx = this.context;
-    if (!ctx) return;
-    for (let i = 0; i < 3; i++) {
-      const t = now + i * beat * 0.5;
-      const noteIdx = (beatIndex + i * 2) % this.IN_SEN.length;
-      const freq = this.IN_SEN[noteIdx] * (1 + 0.01 * (noteIdx % 3));
-      const koto = ctx.createOscillator();
-      koto.type = 'sine';
-      koto.frequency.setValueAtTime(freq, t);
-      koto.frequency.exponentialRampToValueAtTime(freq * 1.002, t + 0.3);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0, t);
-      g.gain.linearRampToValueAtTime(0.3, t + 0.005);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-      koto.connect(g).connect(this.busGain.bgm);
-      koto.start(t);
-      koto.stop(t + 0.6);
+  /** 現在の phase に応じた音階を返す */
+  private get currentScale(): number[] {
+    if (this.phase === 'celebrate') return this.RITSU;
+    return this.HIRAJOSHI;
+  }
+
+  /** 現在の phase に応じた楽句バンクを返す */
+  private currentPhraseBank(): MelodyNote[][] {
+    switch (this.phase) {
+      case 'alert': return this.PHRASES_ALERT;
+      case 'celebrate': return this.PHRASES_CELEBRATE;
+      case 'social': return this.PHRASES_SOCIAL;
+      default: return this.PHRASES_EXPLORE;
     }
   }
 
-  private playShakuhachi(now: number, beatIndex: number): void {
+  /** 音階度数 + オクターブ → 周波数 */
+  private noteFreq(degree: number, oct: number): number {
+    const scale = this.currentScale;
+    const idx = ((degree % scale.length) + scale.length) % scale.length;
+    return scale[idx] * Math.pow(2, oct + Math.floor(degree / scale.length));
+  }
+
+  // --- 笙（shō）持続ドローン ---
+
+  private startShoDrone(): void {
     const ctx = this.context;
     if (!ctx) return;
-    const noteIdx = (beatIndex * 2 + 1) % this.IN_SEN.length;
-    const freq = this.IN_SEN[noteIdx];
-    const shaku = ctx.createOscillator();
-    shaku.type = 'triangle';
-    shaku.frequency.setValueAtTime(freq, now);
-    shaku.frequency.linearRampToValueAtTime(freq * 1.03, now + 0.15);
-    shaku.frequency.linearRampToValueAtTime(freq * 0.98, now + 0.4);
+    const base = this.currentScale[0] / 2;
+    // 笙の伝統的な和音クラスター（根音、五度、八度、長三度、十二度）
+    const intervals = [1, 1.5, 2, 2.52, 3.01];
+    for (const interval of intervals) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = base * interval * (1 + (Math.random() - 0.5) * 0.004);
+      const g = ctx.createGain();
+      g.gain.value = 0.05;
+      // うなり効果（beating）— ゆっくりした振幅変調で笙特有の揺らぎ
+      const lfo = ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = 0.4 + Math.random() * 1.2;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 0.015;
+      lfo.connect(lfoGain).connect(g.gain);
+      osc.connect(g).connect(this.busGain.bgm);
+      osc.start();
+      lfo.start();
+      this.bgmOscillators.push(osc, lfo);
+    }
+  }
+
+  // --- 琴（koto）---
+
+  private playKotoNote(now: number, freq: number, dur: number, bend: number): void {
+    const ctx = this.context;
+    if (!ctx) return;
+
+    // 撥弦アタック — 極短ノイズバースト（爪で弦を弾く瞬間）
+    const aLen = Math.max(1, Math.floor(ctx.sampleRate * 0.004));
+    const aBuf = ctx.createBuffer(1, aLen, ctx.sampleRate);
+    const aData = aBuf.getChannelData(0);
+    for (let i = 0; i < aLen; i++) aData[i] = (Math.random() * 2 - 1) * (1 - i / aLen);
+    const aSrc = ctx.createBufferSource();
+    aSrc.buffer = aBuf;
+    const aFilter = ctx.createBiquadFilter();
+    aFilter.type = 'highpass';
+    aFilter.frequency.value = freq * 1.5;
+    const aGain = ctx.createGain();
+    aGain.gain.value = 0.12;
+    aSrc.connect(aFilter).connect(aGain).connect(this.busGain.bgm);
+    aSrc.start(now);
+
+    // 琴体 — 正弦波 + oshi（押し：ゆっくり音程を上げる伝統技法）
+    const koto = ctx.createOscillator();
+    koto.type = 'sine';
+    koto.frequency.setValueAtTime(freq * (1 - bend * 0.6), now);
+    koto.frequency.linearRampToValueAtTime(freq, now + 0.08 + bend * 0.1);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, now);
-    g.gain.linearRampToValueAtTime(0.25, now + 0.04);
-    g.gain.linearRampToValueAtTime(0.15, now + 0.2);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+    g.gain.linearRampToValueAtTime(0.22, now + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    koto.connect(g).connect(this.busGain.bgm);
+    koto.start(now);
+    koto.stop(now + dur + 0.1);
+
+    // 共鳴弦 — 2 倍音、遅延入り（同道弦の共鳴）
+    const res = ctx.createOscillator();
+    res.type = 'sine';
+    res.frequency.value = freq * 2.001;
+    const rGain = ctx.createGain();
+    rGain.gain.setValueAtTime(0, now + 0.015);
+    rGain.gain.linearRampToValueAtTime(0.06, now + 0.025);
+    rGain.gain.exponentialRampToValueAtTime(0.0001, now + dur * 0.7);
+    res.connect(rGain).connect(this.busGain.bgm);
+    res.start(now + 0.015);
+    res.stop(now + dur);
+  }
+
+  // --- 三味線（shamisen）---
+
+  private playShamisenNote(now: number, freq: number, dur: number): void {
+    const ctx = this.context;
+    if (!ctx) return;
+
+    // 胴体 — 鋸歯波（明るい倍音を持つ弦楽器音色）
+    const body = ctx.createOscillator();
+    body.type = 'sawtooth';
+    body.frequency.value = freq;
+
+    // 共鳴フィルター — 三味線特有の胴鳴り
     const filter = ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.value = freq * 2;
-    filter.Q.value = 1;
-    shaku.connect(filter).connect(g);
-    g.connect(this.busGain.bgm);
-    shaku.start(now);
-    shaku.stop(now + 1);
+    filter.frequency.value = freq * 1.8;
+    filter.Q.value = 4;
+
+    // さわり（sawari）— 微妙な振幅変調で「ブーン」という唸り
+    const buzz = ctx.createOscillator();
+    buzz.type = 'sine';
+    buzz.frequency.value = 42;
+    const buzzGain = ctx.createGain();
+    buzzGain.gain.value = 0.08;
+    buzz.connect(buzzGain);
+
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.1, now + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    buzzGain.connect(g.gain);
+
+    body.connect(filter).connect(g).connect(this.busGain.bgm);
+    body.start(now);
+    buzz.start(now);
+    body.stop(now + dur + 0.1);
+    buzz.stop(now + dur + 0.1);
   }
+
+  // --- 尺八（shakuhachi）---
+
+  private playShakuhachiNote(now: number, freq: number, dur: number): void {
+    const ctx = this.context;
+    if (!ctx) return;
+
+    // 本体 — 正弦波 + meri（メリ：音程を下げる伝統技法）
+    const shaku = ctx.createOscillator();
+    shaku.type = 'sine';
+    shaku.frequency.setValueAtTime(freq, now);
+    shaku.frequency.linearRampToValueAtTime(freq * 0.96, now + dur * 0.25);
+    shaku.frequency.linearRampToValueAtTime(freq * 0.98, now + dur * 0.55);
+
+    // 息雑音 — バンドパスフィルタを通したホワイトノイズ
+    const bLen = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const bBuf = ctx.createBuffer(1, bLen, ctx.sampleRate);
+    const bData = bBuf.getChannelData(0);
+    for (let i = 0; i < bLen; i++) bData[i] = Math.random() * 2 - 1;
+    const bSrc = ctx.createBufferSource();
+    bSrc.buffer = bBuf;
+    const bFilter = ctx.createBiquadFilter();
+    bFilter.type = 'bandpass';
+    bFilter.frequency.value = freq * 2.5;
+    bFilter.Q.value = 1.5;
+    const bGain = ctx.createGain();
+    bGain.gain.setValueAtTime(0, now);
+    bGain.gain.linearRampToValueAtTime(0.035, now + dur * 0.12);
+    bGain.gain.linearRampToValueAtTime(0.015, now + dur * 0.5);
+    bGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    bSrc.connect(bFilter).connect(bGain).connect(this.busGain.bgm);
+
+    // 音色エンベロープ — ゆっくりしたアタック（息吹き込み）
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(0.16, now + dur * 0.12);
+    g.gain.linearRampToValueAtTime(0.12, now + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    shaku.connect(g).connect(this.busGain.bgm);
+    shaku.start(now);
+    bSrc.start(now);
+    shaku.stop(now + dur + 0.1);
+    bSrc.stop(now + dur + 0.1);
+  }
+
+  // --- 太鼓（taiko）---
 
   private playTaiko(now: number): void {
     const ctx = this.context;
     if (!ctx) return;
-    const taiko = ctx.createOscillator();
-    taiko.type = 'sine';
-    taiko.frequency.setValueAtTime(60, now);
-    taiko.frequency.exponentialRampToValueAtTime(30, now + 0.2);
-    const tg = ctx.createGain();
-    tg.gain.setValueAtTime(0, now);
-    tg.gain.linearRampToValueAtTime(0.4, now + 0.01);
-    tg.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    taiko.connect(tg).connect(this.busGain.bgm);
-    taiko.start(now);
-    taiko.stop(now + 0.5);
 
+    // 打撃 — 短ノイズ + ローパス（皮を叩く瞬間）
+    const iLen = Math.max(1, Math.floor(ctx.sampleRate * 0.015));
+    const iBuf = ctx.createBuffer(1, iLen, ctx.sampleRate);
+    const iData = iBuf.getChannelData(0);
+    for (let i = 0; i < iLen; i++) iData[i] = (Math.random() * 2 - 1) * (1 - i / iLen);
+    const iSrc = ctx.createBufferSource();
+    iSrc.buffer = iBuf;
+    const iFilter = ctx.createBiquadFilter();
+    iFilter.type = 'lowpass';
+    iFilter.frequency.value = 350;
+    const iGain = ctx.createGain();
+    iGain.gain.value = 0.22;
+    iSrc.connect(iFilter).connect(iGain).connect(this.busGain.bgm);
+    iSrc.start(now);
+
+    // 胴体 — 正弦波ピッチスイープ
     const body = ctx.createOscillator();
     body.type = 'sine';
-    body.frequency.setValueAtTime(80, now);
-    body.frequency.exponentialRampToValueAtTime(55, now + 0.3);
-    const bg = ctx.createGain();
-    bg.gain.setValueAtTime(0, now);
-    bg.gain.linearRampToValueAtTime(0.25, now + 0.01);
-    bg.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-    body.connect(bg).connect(this.busGain.bgm);
+    body.frequency.setValueAtTime(88, now);
+    body.frequency.exponentialRampToValueAtTime(42, now + 0.22);
+    const bGain = ctx.createGain();
+    bGain.gain.setValueAtTime(0, now);
+    bGain.gain.linearRampToValueAtTime(0.32, now + 0.004);
+    bGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+    body.connect(bGain).connect(this.busGain.bgm);
     body.start(now);
-    body.stop(now + 0.5);
+    body.stop(now + 0.45);
+
+    // 殻鳴り — 高域倍音
+    const shell = ctx.createOscillator();
+    shell.type = 'sine';
+    shell.frequency.setValueAtTime(190, now);
+    shell.frequency.exponentialRampToValueAtTime(115, now + 0.18);
+    const sGain = ctx.createGain();
+    sGain.gain.setValueAtTime(0, now);
+    sGain.gain.linearRampToValueAtTime(0.1, now + 0.004);
+    sGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+    shell.connect(sGain).connect(this.busGain.bgm);
+    shell.start(now);
+    shell.stop(now + 0.35);
   }
 
   stopBGM(): void {
@@ -1051,10 +1272,6 @@ export class AudioSystem {
     if (this.bgmInterval !== null) {
       clearTimeout(this.bgmInterval);
       this.bgmInterval = null;
-    }
-    if (this.bgmDrumTimeout !== null) {
-      clearTimeout(this.bgmDrumTimeout);
-      this.bgmDrumTimeout = null;
     }
     for (const osc of this.bgmOscillators) {
       try {
