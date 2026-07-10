@@ -22,11 +22,25 @@ const BASE_BOUNDS: ArenaBounds = {
 };
 
 function getBoundsForLevel(level: number): ArenaBounds {
-  // Level 1 is half the original size (easier + faster to load); each
-  // later level doubles, ramping difficulty back up. The map stops growing at
+  // Level 1 is a SMALL tutorial-scale arena so first-time players can
+  // finish a full feeding loop in a couple of minutes — the goal is for
+  // the first run to feel easy and satisfying, then difficulty ramps up.
+  // Each subsequent level doubles the arena. The map stops growing at
   // level 7 so it never becomes unwieldy to traverse (capped scale).
-  const effective = Math.min(level, 7);
-  const scale = 0.5 * Math.pow(2, effective - 1);
+  //
+  //   L1 → 0.25 × BASE  (half of the previous L1 size, per dad 2026-07-10:
+  //                       "再减少 50%，方便通关，我想客户第一关尽可能简单")
+  //   L2 → 0.5  × BASE
+  //   L3 → 1.0  × BASE
+  //   L4 → 2.0  × BASE
+  //   …
+  //   L7+ → cap
+  //
+  // Note: only L1 is shrunk further than the prior curve. Other levels
+  // remain on the original L2=0.5× / L3=1.0× / L4=2.0× ramp.
+  const effective = Math.max(1, Math.min(level, 7));
+  const baseScale = 0.5 * Math.pow(2, effective - 1);
+  const scale = level === 1 ? baseScale * 0.5 : baseScale;
   return {
     halfWidth: Math.round(BASE_BOUNDS.halfWidth * scale),
     halfDepth: Math.round(BASE_BOUNDS.halfDepth * scale),
