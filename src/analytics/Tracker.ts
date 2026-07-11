@@ -8,6 +8,7 @@
  *   mid-session doesn't drop the most recent state).
  * - Batch flushes every 30s + on `pagehide` (using `navigator.sendBeacon`
  *   when available so the unload request actually leaves the browser).
+ * - Failed uploads are dropped (no retry buffer). The next flush starts fresh.
  * - Endpoints: POST /api/track (public, rate-limited at nginx+Flask layer).
  * - `tracker.recordEvent(type, payload?)` is the public API for game code.
  *   `tracker.recordState()` is auto-called from an internal 10s timer based
@@ -315,24 +316,18 @@ class TrackerImpl implements TrackerApi {
     };
 
     // Drain locally first to avoid double-sending on slow networks.
-    const events = this.buffer.events.splice(0, this.buffer.events.length);
-    const snaps = this.buffer.snapshots.splice(0, this.buffer.snapshots.length);
-    saveBuffer(this.buffer);
-
     const payload = JSON.stringify(body);
 
     try {
-      const ok = await postTrack(payload);
-      if (!ok) {
-        // Put them back at the head so the next attempt retries.
-        this.buffer.events = events.concat(this.buffer.events);
-        this.buffer.snapshots = snaps.concat(this.buffer.snapshots);
-        saveBuffer(this.buffer);
-      }
+      await postTrack(payload);
+      // Success — clear the persisted buffer so we don't re-send on reload.
+      this.buffer.events.length = 0;
+      this.buffer.snapshots.length = 0;
+      saveBuffer(this.buffer);
     } catch {
-      // Network down — re-buffer. The next flush will pick them up.
-      this.buffer.events = events.concat(this.buffer.events);
-      this.buffer.snapshots = snaps.concat(this.buffer.snapshots);
+      // Upload failed — drop this batch. The next flush starts fresh.
+      this.buffer.events.length = 0;
+      this.buffer.snapshots.length = 0;
       saveBuffer(this.buffer);
     } finally {
       this.flushing = false;
