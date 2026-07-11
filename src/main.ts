@@ -1,6 +1,7 @@
 import './styles.css';
 import { Game } from './game/Game';
 import { loadDeerTemplate, onLoadProgress as onDeerLoadProgress } from './entities/DeerModel';
+import { getTracker } from './analytics/Tracker';
 import { loadVendorTemplate, onLoadProgress as onVendorLoadProgress } from './entities/VendorModel';
 
 // Detect the REAL input device and tag <body> so CSS shows the correct control
@@ -134,6 +135,9 @@ async function startGame(): Promise<void> {
     if (game) game.dispose();
     game = new Game(canvasEl!);
     game.start();
+    // Analytics — fire game_start once the Game is alive and bindings are
+    // installed (the bindStateReader happens inside Game's constructor).
+    getTracker().recordEvent('game_start');
     // Expose for the static UI handlers wired above.
     (window as unknown as { __game?: Game }).__game = game;
     titleOverlay?.classList.add('hidden');

@@ -15,6 +15,7 @@ import { Hud } from '../systems/Hud';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { Park, type MoneyTreeInfo } from '../environment/Park';
 import { SimonSays } from '../minigames/SimonSays';
+import { getTracker } from '../analytics/Tracker';
 
 const BASE_BOUNDS: ArenaBounds = {
   halfWidth: 120,
@@ -236,6 +237,7 @@ export class Game {
   private moneyTreeShakeGroup: THREE.Group | null = null;
   private shareCooldown = 0;           // seconds; anti-spam gate between shares
   private totalShares = 0;             // lifetime shares (meta progression / titles)
+  private lifetimeMoneySpent = 0;      // total spent on shop items (for analytics)
   private currentTitle = '';            // last unlocked title (change detection)
   private sharedBonusForNextLevel = false;
   private waterCooldown = 0;
@@ -299,8 +301,29 @@ export class Game {
     this.cameraRig.snapTo(this.player.group.position, this.input.getCameraYaw(), this.input.getCameraPitch());
     resizeRenderer(this.renderer, this.camera, this.tuning.maxDpr);
 
+    // ---- Analytics ----
+    // Bind state reader for the 10s snapshot timer. Reads the live game
+    // state every interval (cheap — Game fields are just property reads).
+    getTracker().bindStateReader(() => ({
+      level: this.currentLevel,
+      money: this.money,
+      crackers: this.crackerCount,
+      deerFed: this.deerFed,
+      deerRemaining: Math.max(0, this.levelConfig.deerToFeed - this.deerFed),
+      pos: [this.player.group.position.x, this.player.group.position.z],
+    }));
+    // Initial summary so the server sees at least the starting state even
+    // before any event fires.
+    getTracker().setSummary({
+      highestLevel: this.currentLevel,
+      titlesUnlocked: [this.currentTitle],
+    });
+
     // Wire player callbacks for audio
-    this.player.onDash = () => this.audio.dash();
+    this.player.onDash = () => {
+      this.audio.dash();
+      getTracker().recordEvent('dash');
+    };
 
     // Show touch controls on touch-capable devices (mobile/tablet)
     const touchControls = document.getElementById('touch-controls');
@@ -380,6 +403,10 @@ export class Game {
       this.money += this.sharedBonusForNextLevel ? 100 : 0;
     }
     this.sharedBonusForNextLevel = false;
+
+    // Analytics — level start event + highest-level rollup.
+    getTracker().recordEvent('level_start', { level });
+    getTracker().setSummary({ highestLevel: Math.max(level, 0), totalMoneyEarned: this.money });
     this.levelComplete = false;
     this.feedCooldown = 0;
     this.obstacleNearby = false;
@@ -507,6 +534,13 @@ export class Game {
     if (inWater && !this.wasInWater && this.waterCooldown <= 0 && !this.levelComplete && this.waterWardTimer <= 0) {
       this.crackerCount--;
       this.waterCooldown = 3;
+
+      // Analytics — water splash (each instance; the 3s cooldown stops spam).
+      getTracker().recordEvent('crack_pool', {
+        crackersAfter: this.crackerCount,
+        hadWaterWard: false,
+        level: this.currentLevel,
+      });
       this.audio.splash(this.player.group.position);
       this.hud.showToast('掉水里了！-1 仙贝 💧');
       // Push player back
@@ -678,6 +712,16 @@ export class Game {
       this.audio.victory();
       this.audio.levelUp();
       this.particles.emitConfetti(this.player.group.position.clone().add(new THREE.Vector3(0, 2, 0)));
+
+      // Analytics — level complete + final-level rollup (sets `completed`
+      // when the player finishes the last level).
+      const isFinalLevel = this.currentLevel >= 8;
+      getTracker().recordEvent('level_complete', { level: this.currentLevel, isFinalLevel });
+      getTracker().setSummary({
+        highestLevel: this.currentLevel,
+        totalDeerFed: this.deerFed,
+        completed: isFinalLevel || undefined,
+      });
       // Hide the shop button + close any open shop while the completion card is up.
       const sb = document.getElementById('shop-button');
       if (sb) sb.style.display = 'none';
@@ -1023,6 +1067,14 @@ export class Game {
       this.hud.showToast(`分享成功！+100 円 🎉（累计分享 ${this.totalShares} 次）`);
     }
     this.shareCooldown = 4; // anti-spam cooldown (seconds)
+
+    // Analytics — share event + roll up totals + title unlock.
+    getTracker().recordEvent('share', { kind: isCompletion ? 'completion' : 'inline' });
+    getTracker().setSummary({
+      totalShares: this.totalShares,
+      totalMoneyEarned: this.money,
+      titlesUnlocked: [newTitle.name],
+    });
   }
 
   private static readonly SHARE_TITLES: Array<{ min: number; name: string; desc: string }> = [
@@ -1153,6 +1205,12 @@ export class Game {
     this.audio.uiClick();
     this.applyItem(item.id);
     this.renderShop(); // refresh affordance + money
+
+    // Analytics — buy event + roll up total spent (MAX-style, since money
+    // can be refunded by future shop mechanics).
+    this.lifetimeMoneySpent += item.cost;
+    getTracker().recordEvent('buy', { item: item.id, price: item.cost });
+    getTracker().setSummary({ totalMoneySpent: this.lifetimeMoneySpent });
   }
 
   private applyItem(id: string): void {
@@ -1241,6 +1299,14 @@ export class Game {
     this.deerFed++;
     this.crackerCount--;
     this.feedCooldown = 0.3;
+
+    // Analytics — record this feeding action + roll up totals.
+    getTracker().recordEvent('feed', {
+      deer: deer.index,
+      rarity: deer.rarity,
+      personality: deer.personality,
+    });
+    getTracker().setSummary({ totalDeerFed: this.deerFed });
     this.audio.feed(deer.group.position);
     this.hud.showToast('喂食成功！🦌');
     this.journal.markCollected(deer.index);
