@@ -711,6 +711,7 @@ export class Game {
       this.currentLevel,
       this.nearestMoneyTree !== null,
       this.shareCooldown <= 0,
+      this.currentTitle,
     );
 
     if (this.deerFed >= this.levelConfig.deerToFeed && !this.levelComplete) {
@@ -718,6 +719,12 @@ export class Game {
       this.audio.victory();
       this.audio.levelUp();
       this.particles.emitConfetti(this.player.group.position.clone().add(new THREE.Vector3(0, 2, 0)));
+      // Pre-fill the completion overlay's title pill so it shows on the
+      // first render frame (Hud.update runs in parallel and would normally
+      // write it, but this guards against the rare race where the overlay
+      // shows before the next Hud.update).
+      const titleVal = document.getElementById('completion-title-value');
+      if (titleVal) titleVal.textContent = this.currentTitle;
 
       // Analytics — level complete + final-level rollup (sets `completed`
       // when the player finishes the last level).
@@ -857,7 +864,7 @@ export class Game {
     const title = this.currentTitle;
     if (isCompletion) {
       return [
-        `🦌 我在《奈良公园·喂鹿》通关第 ${this.currentLevel} 关啦！`,
+        `🦌 我在《奈良公园·喂鹿》通关啦！`,
         `本关喂饱 ${fed}/${target} 只小鹿，图鉴已集齐 ${collected} 种，称号「${title}」`,
         `你能喂多少只？敢来挑战收集全图鉴吗？👇`,
         url,
@@ -865,7 +872,7 @@ export class Game {
     }
     return [
       `🦌《奈良公园·喂鹿》– 治愈系收集挑战！`,
-      `我正在第 ${this.currentLevel} 关，已喂饱 ${fed}/${target} 只小鹿，`,
+      `已喂饱 ${fed}/${target} 只小鹿，`,
       `图鉴集齐 ${collected} 种，称号「${title}」`,
       `稀有鹿和传说鹿超难靠近，看你能否集齐全部！来一起喂鹿 👇`,
       url,
@@ -1394,9 +1401,13 @@ export class Game {
     for (const d of this.deerList) this.scene.remove(d.group);
     this.deerList.length = 0;
     const f = contentScaleFor(bounds);
+    const level = this.currentLevel;
     for (const spawn of DEER_SPAWNS) {
       const position = new THREE.Vector3(spawn.x * f, 0, spawn.z * f);
-      const deer = new Deer(this.deerList.length, position, { detectionRange: 4 + Math.random() * 2 });
+      const deer = new Deer(this.deerList.length, position, {
+        detectionRange: 4 + Math.random() * 2,
+        level, // downshiftRarity uses this to gate Legendary behind L4+
+      });
       // Teach the tease rule via clear toasts: warn when the player starts to
       // leave an expectant deer, then explain when it actually gets angry.
       deer.onTease = (stage) => {

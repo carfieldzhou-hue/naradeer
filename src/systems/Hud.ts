@@ -48,6 +48,7 @@ export class Hud {
     level?: number,
     moneyTreeNearby?: boolean,
     shareAvailable?: boolean,
+    currentTitle?: string,
   ): void {
     this.scoreCount.textContent = String(score);
 
@@ -100,6 +101,11 @@ export class Hud {
       const subtitleEl = document.getElementById('level-subtitle');
       if (titleEl) titleEl.textContent = `第 ${level ?? 1} 关 完成！`;
       if (subtitleEl) subtitleEl.textContent = '继续挑战下一关吧 🦌';
+      // Title pill — Game passes the latest currentTitle via the optional
+      // param so the overlay shows the player's meta-progression even when
+      // the journal isn't open.
+      const titleValEl = document.getElementById('completion-title-value');
+      if (titleValEl && currentTitle) titleValEl.textContent = currentTitle;
       // Hide the HUD share button while overlay is shown
       this.shareButton.style.display = 'none';
     }

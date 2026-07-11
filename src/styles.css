@@ -259,6 +259,30 @@ body {
   margin-bottom: 10px;
 }
 
+.completion-title-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px auto 18px;
+  padding: 6px 16px;
+  background: rgba(109, 210, 165, 0.18);
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.completion-title-label {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.completion-title-value {
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
 .completion-card h2 {
   font-size: 1.4rem;
   margin: 0 0 6px;
@@ -1082,16 +1106,19 @@ body {
     padding: 4px 10px;
   }
 
-  /* Phone layout: pull the share / shop buttons up so they actually sit
-     in the top-right corner, not under the journal hint chip. */
+  /* Phone layout: stack the share / shop buttons below the HUD so they
+     don't overlap the stat bars (HUD fills y=10–129 on iPhone 14). The
+     previous `top: 72px` put them right on top of status-text + journal
+     hint, which is what dad reported as 'share button overlapping with
+     other layers'. */
   .share-btn {
-    top: max(72px, calc(10px + 44px + 12px));
+    top: calc(max(10px, env(safe-area-inset-top)) + 119px + 12px);
     right: 10px;
     font-size: 0.78rem;
     padding: 7px 11px;
   }
   .shop-btn {
-    top: max(112px, calc(10px + 44px + 12px + 40px));
+    top: calc(max(10px, env(safe-area-inset-top)) + 119px + 12px + 40px + 8px);
     right: 10px;
   }
 

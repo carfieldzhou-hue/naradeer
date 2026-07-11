@@ -101,6 +101,8 @@ export interface DeerTuning {
   bowDuration: number;
   eatDuration: number;
   happyDuration: number;
+  /** Current level — used to gate Legendary / Rare / Uncommon downshifts. */
+  level?: number;
 }
 
 const DEFAULT_TUNING: DeerTuning = {
@@ -111,6 +113,7 @@ const DEFAULT_TUNING: DeerTuning = {
   bowDuration: 2,
   eatDuration: 2.5,
   happyDuration: 3,
+  level: 1,
 };
 
 function createFeedIndicatorTexture(): THREE.CanvasTexture {
@@ -146,7 +149,64 @@ function createFeedIndicatorTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+function createFedIndicatorTexture(): THREE.CanvasTexture {
+  // Heart icon on a soft pink bubble — shown above fed deer so the player
+  // can tell at a glance which deer they've already fed (no double-feeding).
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+
+  // Outer glow
+  ctx.beginPath();
+  ctx.arc(32, 32, 22, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 138, 174, 0.25)';
+  ctx.fill();
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(32, 32, 16, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffb6c1';
+  ctx.fill();
+  ctx.strokeStyle = '#ff5c8a';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Heart shape (bezier)
+  ctx.beginPath();
+  ctx.moveTo(32, 42);
+  ctx.bezierCurveTo(32, 38, 22, 36, 22, 28);
+  ctx.bezierCurveTo(22, 23, 27, 21, 32, 27);
+  ctx.bezierCurveTo(37, 21, 42, 23, 42, 28);
+  ctx.bezierCurveTo(42, 36, 32, 38, 32, 42);
+  ctx.closePath();
+  ctx.fillStyle = '#d81b60';
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 const feedIndicatorTexture = createFeedIndicatorTexture();
+const fedIndicatorTexture = createFedIndicatorTexture();
+
+/**
+ * Downshift a deer from its design rarity to the highest rarity the current
+ * level allows. Without this, the Legendary deer (always index 15) would
+ * spawn on level 1 — clobbering the L4+ "boss" reward of finally meeting one.
+ *
+ *   Legendary → Rare (L<4)
+ *   Rare      → Uncommon (L<3)
+ *   Uncommon  → Common (L<2)
+ *   Common    → Common
+ */
+export function downshiftRarity(design: DeerRarity, level: number): DeerRarity {
+  if (design === DeerRarity.Legendary && level < 4) return DeerRarity.Rare;
+  if (design === DeerRarity.Rare && level < 3) return DeerRarity.Uncommon;
+  if (design === DeerRarity.Uncommon && level < 2) return DeerRarity.Common;
+  return design;
+}
 
 export class Deer {
   readonly group = new THREE.Group();
@@ -176,6 +236,10 @@ export class Deer {
 
   // Feed indicator (3D world-space prompt)
   private readonly feedIndicator: THREE.Sprite;
+  // Fed indicator — shown when this deer has been fed this level. Different
+  // sprite (heart on pink bubble) so the player can tell at a glance which
+  // deer are done.
+  private readonly fedIndicator: THREE.Sprite;
 
   // Visual variety
   readonly scaleFactor: number;
@@ -218,7 +282,10 @@ export class Deer {
     this.wanderTarget = position.clone();
     this.personality = PERSONALITY_BY_INDEX[index] ?? DeerPersonality.Gentle;
     this.specialVariant = SPECIAL_VARIANT_BY_INDEX[index] ?? 'none';
-    this.rarity = RARITY_BY_INDEX[index] ?? DeerRarity.Common;
+    this.rarity = downshiftRarity(
+      RARITY_BY_INDEX[index] ?? DeerRarity.Common,
+      tuning?.level ?? 1,
+    );
     this.minLevel = this.rarity === DeerRarity.Legendary ? 4 : this.rarity === DeerRarity.Rare ? 3 : this.rarity === DeerRarity.Uncommon ? 2 : 1;
     this.isMale = GENDER_BY_INDEX[index] === 1;
     this.hasAntlers = ANTLERS_BY_INDEX[index];
@@ -269,6 +336,20 @@ export class Deer {
     this.feedIndicator.scale.set(0.3, 0.3, 1);
     this.feedIndicator.visible = false;
     this.group.add(this.feedIndicator);
+
+    // ---- Fed indicator (3D prompt — heart on pink bubble) ----
+    this.fedIndicator = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: fedIndicatorTexture,
+        transparent: true,
+        depthTest: false,
+        sizeAttenuation: true,
+      }),
+    );
+    this.fedIndicator.position.y = 1.0;
+    this.fedIndicator.scale.set(0.3, 0.3, 1);
+    this.fedIndicator.visible = false;
+    this.group.add(this.fedIndicator);
 
     this.group.position.copy(position);
     this.group.rotation.y = Math.random() * Math.PI * 2;
@@ -632,11 +713,18 @@ export class Deer {
       }
     }
 
-    // Feed indicator: show floating "!" above deer ready to be fed
-    const showIndicator = this.state.current === DeerState.Bow && !this.fed;
-    this.feedIndicator.visible = showIndicator;
-    if (showIndicator) {
+    // Feed indicator: show floating "!" above deer ready to be fed.
+    // Fed indicator: show heart when this deer has been fed this level —
+    // gives the player a quick "I'm done" visual so they don't double-feed.
+    const showFeedIndicator = this.state.current === DeerState.Bow && !this.fed;
+    this.feedIndicator.visible = showFeedIndicator;
+    if (showFeedIndicator) {
       this.feedIndicator.position.y = 1.0 + Math.sin(Date.now() * 0.004) * 0.06;
+    }
+    const showFedIndicator = this.fed;
+    this.fedIndicator.visible = showFedIndicator;
+    if (showFedIndicator) {
+      this.fedIndicator.position.y = 1.0 + Math.sin(Date.now() * 0.004 + 1.5) * 0.06;
     }
 
     if (this.butterflyWingsGroup) {
