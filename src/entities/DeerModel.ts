@@ -86,6 +86,40 @@ export async function loadDeerTemplate(): Promise<void> {
     }
   });
 
+  // ---- Auto-normalize unit (fbx2gltf conversion bug) ----
+  // The deer GLB exported via fbx2gltf comes in at 0.017m tall (1.7cm) — the
+  // conversion tool left the original FBX cm/metadata unhandled and shrank
+  // vertices ~100x. VendorModel's GLB is fine (1.83m), so the issue is
+  // specific to the deer FBX. Detect by checking the GLB's root bbox: a real
+  // fawn is at least 0.5m at the hip — anything under that is a unit bug.
+  //
+  // Apply the fix to glbGroup's FIRST CHILD (the GLB's internal root, e.g.
+  // "RootNode") rather than glbGroup itself. Reason: glbGroup becomes the
+  // template, and Deer.ts calls `modelRoot.scale.setScalar(scaleFactor)` for
+  // per-rarity size. If we scale glbGroup itself, that later setScalar()
+  // overwrites our fix. Scaling the inner root nests the transform: the
+  // eventual world size is (rarity scaleFactor) × (fixScale) × (vertex size).
+  const TARGET_DEER_HEIGHT = 1.2; // cartoony "deer at player's hip" height — readable from camera
+  const UNIT_BUG_THRESHOLD = 0.5; // anything shorter than this is clearly broken
+  const probeBox = new THREE.Box3().setFromObject(glbGroup);
+  const probeHeight = probeBox.max.y - probeBox.min.y;
+  if (probeHeight > 0 && probeHeight < UNIT_BUG_THRESHOLD) {
+    const fixScale = TARGET_DEER_HEIGHT / probeHeight;
+    // Walk one level down. Use a dedicated Object3D wrapper so we never
+    // mutate a child we don't own (RootNode is an Object3D, not a Group).
+    const innerRoot = glbGroup.children[0];
+    if (innerRoot) {
+      innerRoot.scale.setScalar(fixScale);
+      // Make sure the new transform lands before Deer.ts builds the template
+      // (modelRoot = clone(template) reads from inner RootNode's world).
+      glbGroup.updateMatrixWorld(true);
+      console.warn(
+        `[DeerModel] fbx2gltf unit bug detected: GLB height=${probeHeight.toFixed(3)}m. ` +
+        `Auto-normalized inner root with scale=${fixScale.toFixed(1)}x to ~${TARGET_DEER_HEIGHT}m.`,
+      );
+    }
+  }
+
   template = glbGroup;
   templateClips = gltf.animations ?? [];
 

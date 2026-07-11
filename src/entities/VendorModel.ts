@@ -126,6 +126,17 @@ export function cloneVendorTemplate(): THREE.Group {
     }
   });
 
+  // Apply the scaleFactor that loadVendorTemplate computed from the GLB
+  // bounding box, and lift the model so its base sits on y=0 instead of
+  // floating at the GLB's internal origin. (Restored after 99fd652 dropped
+  // both lines — without them vendor stalls came out at 1.8m tall and
+  // hovering in the air.)
+  clone.scale.setScalar(scaleFactor);
+  const bbox = new THREE.Box3().setFromObject(clone);
+  const minY = bbox.min.y;
+  clone.position.y = -minY;
+  clone.updateWorldMatrix(true, true);
+
   return clone;
 }
 
