@@ -2,10 +2,20 @@
   color: #f6f1df;
   background: #4a7c59;
   font-family:
+    -apple-system,
+    BlinkMacSystemFont,
     'Hiragino Sans',
     'Noto Sans JP',
     'Yu Gothic',
     'Segoe UI',
+    /* Emoji fallbacks — order matters: each platform's bundled emoji font
+       comes first so the browser doesn't have to chase a system fallback
+       (e.g. WeChat X5 / iOS WKWebView embedded browsers sometimes drop
+       Apple Color Emoji in CSS, so list them explicitly). */
+    'Apple Color Emoji',
+    'Segoe UI Emoji',
+    'Noto Color Emoji',
+    'Twemoji Mozilla',
     sans-serif;
   font-synthesis: none;
   text-rendering: geometricPrecision;
@@ -1070,6 +1080,19 @@ body {
   #status-text {
     font-size: 0.72rem;
     padding: 4px 10px;
+  }
+
+  /* Phone layout: pull the share / shop buttons up so they actually sit
+     in the top-right corner, not under the journal hint chip. */
+  .share-btn {
+    top: max(72px, calc(10px + 44px + 12px));
+    right: 10px;
+    font-size: 0.78rem;
+    padding: 7px 11px;
+  }
+  .shop-btn {
+    top: max(112px, calc(10px + 44px + 12px + 40px));
+    right: 10px;
   }
 
   #feed-hint {
