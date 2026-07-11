@@ -285,8 +285,8 @@ export class Game {
     this.scene.add(this.park.group);
 
     this.createScene();
-    this.createDeer();
-    this.createObstacles();
+    this.createDeer(this.currentBounds);
+    this.createObstacles(this.currentBounds);
     this.createVendors();
     this.createChests(this.levelConfig.moneyPool);
 
@@ -454,6 +454,12 @@ export class Game {
     this.scene.fog = new THREE.Fog('#c8e6c9', far * 0.3, far);
 
     for (const deer of this.deerList) deer.reset(level);
+    this.journal.updateEntries(this.deerList.map((d) => d.getDeerInfo()));
+    // Respawn obstacles + herd at the current level's bounds. Without this
+    // they'd stay at the L1 design-space scale, so on L2+ they'd all cluster
+    // near the centre / overlap the water / float above the ground.
+    this.createObstacles(this.currentBounds);
+    this.createDeer(this.currentBounds);
     this.journal.updateEntries(this.deerList.map((d) => d.getDeerInfo()));
     this.createChests(this.levelConfig.moneyPool);
     this.createVendorsForLevel(level);
@@ -1374,8 +1380,8 @@ export class Game {
     this.scene.add(this.player.group);
   }
 
-  private createObstacles(): void {
-    const f = contentScaleFor(getBoundsForLevel(1)); // created once, at level-1 size
+  private createObstacles(bounds: ArenaBounds): void {
+    const f = contentScaleFor(bounds);
     for (const def of OBSTACLES) {
       const obs = new Obstacle({ ...def, x: def.x * f, z: def.z * f });
       this.obstacles.push(obs);
@@ -1383,8 +1389,11 @@ export class Game {
     }
   }
 
-  private createDeer(): void {
-    const f = contentScaleFor(getBoundsForLevel(1)); // created once, at level-1 size
+  private createDeer(bounds: ArenaBounds): void {
+    // Tearing down the previous level's herd (if any) before spawning fresh.
+    for (const d of this.deerList) this.scene.remove(d.group);
+    this.deerList.length = 0;
+    const f = contentScaleFor(bounds);
     for (const spawn of DEER_SPAWNS) {
       const position = new THREE.Vector3(spawn.x * f, 0, spawn.z * f);
       const deer = new Deer(this.deerList.length, position, { detectionRange: 4 + Math.random() * 2 });
